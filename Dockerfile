@@ -1,5 +1,6 @@
 FROM node:20-alpine AS build
 WORKDIR /app
+RUN apk add --no-cache openssl
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY prisma ./prisma
@@ -12,6 +13,7 @@ RUN pnpm run build
 FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+RUN apk add --no-cache openssl
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY prisma ./prisma
