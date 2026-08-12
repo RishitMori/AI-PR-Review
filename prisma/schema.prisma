@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Repository {
+  id          Int           @id @default(autoincrement())
+  githubId    BigInt        @unique @map("github_id")
+  owner       String        @db.VarChar(255)
+  name        String        @db.VarChar(255)
+  fullName    String        @map("full_name") @db.VarChar(255)
+  installedAt DateTime?     @default(now()) @map("installed_at") @db.Timestamp(6)
+  pullRequests PullRequest[]
+
+  @@map("repositories")
+}
+
+model PullRequest {
+  id                     Int       @id @default(autoincrement())
+  repoId                 Int?      @map("repo_id")
+  prNumber               Int       @map("pr_number")
+  prTitle                String?   @map("pr_title") @db.VarChar(500)
+  prAuthor               String?   @map("pr_author") @db.VarChar(255)
+  headSha                String    @map("head_sha") @db.VarChar(40)
+  status                 String?   @default("pending") @db.VarChar(50)
+  githubSummaryCommentId BigInt?   @map("github_summary_comment_id")
+  failureMessage         String?   @map("failure_message")
+  failedAt               DateTime? @map("failed_at") @db.Timestamp(6)
+  createdAt              DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt              DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  repository Repository? @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  reviews    Review[]
+
+  @@unique([repoId, prNumber, headSha])
+  @@index([status])
+  @@index([repoId, prNumber])
+  @@map("pull_requests")
+}
+
+model Review {
+  id               Int             @id @default(autoincrement())
+  prId             Int?            @map("pr_id")
+  overallScore     Int?            @map("overall_score")
+  summary          String?
+  llmProvider      String?         @map("llm_provider") @db.VarChar(100)
+  llmModel         String?         @map("llm_model") @db.VarChar(150)
+  promptTokens     Int?            @map("prompt_tokens")
+  completionTokens Int?            @map("completion_tokens")
+  rawResponse      Json?           @map("raw_response")
+  createdAt        DateTime?       @default(now()) @map("created_at") @db.Timestamp(6)
+
+  pullRequest PullRequest?    @relation(fields: [prId], references: [id], onDelete: Cascade)
+  comments    ReviewComment[]
+
+  @@index([prId])
+  @@map("reviews")
+}
+
+model ReviewComment {
+  id              Int       @id @default(autoincrement())
+  reviewId        Int?      @map("review_id")
+  filePath        String?   @map("file_path") @db.VarChar(500)
+  lineNumber      Int?      @map("line_number")
+  severity        String?   @db.VarChar(50)
+  comment         String
+  githubCommentId BigInt?   @map("github_comment_id")
+  createdAt       DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  review Review? @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@map("review_comments")
+}
+
+model WebhookEvent {
+  id           Int       @id @default(autoincrement())
+  deliveryId   String    @unique @map("delivery_id") @db.VarChar(255)
+  eventName    String    @map("event_name") @db.VarChar(100)
+  action       String?   @db.VarChar(100)
+  repoFullName String?   @map("repo_full_name") @db.VarChar(255)
+  prNumber     Int?      @map("pr_number")
+  receivedAt   DateTime? @default(now()) @map("received_at") @db.Timestamp(6)
+
+  @@map("webhook_events")
+}
