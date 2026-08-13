@@ -142,3 +142,25 @@ https://ai-pr-review-api-xxxxx.a.run.app/webhook
 ```
 
 Then trigger a PR event and check Cloud Run logs.
+
+## Redeploy After Code Changes
+
+After pushing changes and pulling them in Cloud Shell, you can redeploy everything with:
+
+```bash
+export PROJECT_ID="your-gcp-project-id"
+export REGION="asia-south1"
+export INSTANCE_CONNECTION_NAME="PROJECT_ID:REGION:INSTANCE_NAME"
+
+bash scripts/gcp-redeploy.sh
+```
+
+Optional overrides:
+
+```bash
+export REPO="ai-pr-review-bot"
+export API_SERVICE="ai-pr-review-api"
+export WORKER_POOL="ai-pr-review-worker"
+export MIGRATE_JOB="ai-pr-review-migrate"
+export IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/app:latest"
+```

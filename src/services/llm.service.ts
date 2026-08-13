@@ -15,6 +15,11 @@ interface OpenRouterResponse {
   };
 }
 
+interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
 export interface LlmReviewResult {
   review: StructuredReview;
   model: string;
@@ -33,6 +38,57 @@ export async function reviewDiffWithLlm(input: {
 }) {
   await enforceFreeTierLimits();
 
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content: buildSystemPrompt()
+    },
+    {
+      role: 'user',
+      content: buildUserPrompt(input)
+    }
+  ];
+
+  const rawResponse = await requestOpenRouter(messages);
+  const content = extractResponseContent(rawResponse);
+  let review = tryParseReviewJson(content, input.changedFiles);
+
+  if (!review) {
+    const repairResponse = await requestOpenRouter([
+      ...messages,
+      { role: 'assistant', content },
+      {
+        role: 'user',
+        content:
+          'The previous response was not valid JSON. Convert it to ONLY valid JSON with the required shape. Do not include markdown, explanation, or text outside the JSON object.'
+      }
+    ]);
+    const repairContent = extractResponseContent(repairResponse);
+    review = tryParseReviewJson(repairContent, input.changedFiles);
+
+    if (!review) {
+      throw new Error(`LLM response could not be parsed as valid review JSON. First response started with: ${content.slice(0, 200)}`);
+    }
+
+    return {
+      review,
+      model: repairResponse.model ?? rawResponse.model ?? config.OPENROUTER_MODEL,
+      promptTokens: (rawResponse.usage?.prompt_tokens ?? 0) + (repairResponse.usage?.prompt_tokens ?? 0),
+      completionTokens: (rawResponse.usage?.completion_tokens ?? 0) + (repairResponse.usage?.completion_tokens ?? 0),
+      rawResponse: repairResponse
+    } satisfies LlmReviewResult;
+  }
+
+  return {
+    review,
+    model: rawResponse.model ?? config.OPENROUTER_MODEL,
+    promptTokens: rawResponse.usage?.prompt_tokens,
+    completionTokens: rawResponse.usage?.completion_tokens,
+    rawResponse
+  } satisfies LlmReviewResult;
+}
+
+async function requestOpenRouter(messages: ChatMessage[]) {
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -47,16 +103,7 @@ export async function reviewDiffWithLlm(input: {
       response_format: { type: 'json_object' },
       temperature: 0.2,
       max_tokens: config.OPENROUTER_MAX_TOKENS,
-      messages: [
-        {
-          role: 'system',
-          content: buildSystemPrompt()
-        },
-        {
-          role: 'user',
-          content: buildUserPrompt(input)
-        }
-      ]
+      messages
     })
   });
 
@@ -65,19 +112,16 @@ export async function reviewDiffWithLlm(input: {
     throw new Error(`OpenRouter request failed (${response.status}): ${body}`);
   }
 
-  const rawResponse = (await response.json()) as OpenRouterResponse;
+  return (await response.json()) as OpenRouterResponse;
+}
+
+function extractResponseContent(rawResponse: OpenRouterResponse) {
   const content = rawResponse.choices?.[0]?.message?.content;
   if (!content) {
     throw new Error('OpenRouter returned an empty review response.');
   }
 
-  return {
-    review: parseReviewJson(content, input.changedFiles),
-    model: rawResponse.model ?? config.OPENROUTER_MODEL,
-    promptTokens: rawResponse.usage?.prompt_tokens,
-    completionTokens: rawResponse.usage?.completion_tokens,
-    rawResponse
-  } satisfies LlmReviewResult;
+  return content;
 }
 
 async function enforceFreeTierLimits() {
@@ -139,9 +183,37 @@ function buildUserPrompt(input: {
     .join('\n');
 }
 
-function parseReviewJson(content: string, changedFiles: string[]): StructuredReview {
-  const parsed = JSON.parse(content) as Partial<StructuredReview>;
+function tryParseReviewJson(content: string, changedFiles: string[]): StructuredReview | null {
+  for (const candidate of getJsonCandidates(content)) {
+    try {
+      return normalizeReviewJson(JSON.parse(candidate) as Partial<StructuredReview>, changedFiles);
+    } catch {
+      // Try the next candidate.
+    }
+  }
 
+  return null;
+}
+
+function getJsonCandidates(content: string) {
+  const trimmed = content.trim();
+  const candidates = [trimmed];
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fencedMatch?.[1]) {
+    candidates.push(fencedMatch[1].trim());
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  return [...new Set(candidates)];
+}
+
+function normalizeReviewJson(parsed: Partial<StructuredReview>, changedFiles: string[]): StructuredReview {
   if (typeof parsed.overall_score !== 'number' || typeof parsed.summary !== 'string' || !Array.isArray(parsed.comments)) {
     throw new Error('LLM response did not match the expected review JSON shape.');
   }
