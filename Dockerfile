@@ -8,6 +8,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm exec prisma generate
 COPY tsconfig.json ./
 COPY src ./src
+COPY dashboard ./dashboard
 RUN pnpm run build
 
 FROM node:20-alpine
