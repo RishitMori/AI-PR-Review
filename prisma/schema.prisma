@@ -10,13 +10,81 @@ datasource db {
 model Repository {
   id          Int           @id @default(autoincrement())
   githubId    BigInt        @unique @map("github_id")
+  installationId Int?        @map("installation_id")
   owner       String        @db.VarChar(255)
   name        String        @db.VarChar(255)
   fullName    String        @map("full_name") @db.VarChar(255)
   installedAt DateTime?     @default(now()) @map("installed_at") @db.Timestamp(6)
   pullRequests PullRequest[]
+  settings    RepositorySettings?
+  installation GitHubInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
 
+  @@index([installationId])
   @@map("repositories")
+}
+
+model GitHubInstallation {
+  id                   Int       @id @default(autoincrement())
+  githubInstallationId BigInt    @unique @map("github_installation_id")
+  accountGithubId      BigInt?   @map("account_github_id")
+  accountLogin         String?   @map("account_login") @db.VarChar(255)
+  accountType          String?   @map("account_type") @db.VarChar(50)
+  suspendedAt          DateTime? @map("suspended_at") @db.Timestamp(6)
+  createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  repositories Repository[]
+  users        UserInstallation[]
+
+  @@index([accountGithubId])
+  @@map("github_installations")
+}
+
+model UserInstallation {
+  id             Int       @id @default(autoincrement())
+  userId         Int       @map("user_id")
+  installationId Int       @map("installation_id")
+  createdAt      DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  lastSeenAt     DateTime? @default(now()) @map("last_seen_at") @db.Timestamp(6)
+
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  installation GitHubInstallation @relation(fields: [installationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, installationId])
+  @@index([installationId])
+  @@map("user_installations")
+}
+
+model RepositorySettings {
+  id                  Int       @id @default(autoincrement())
+  repoId              Int       @unique @map("repo_id")
+  enabled             Boolean   @default(true)
+  reviewOnOpened      Boolean   @default(true) @map("review_on_opened")
+  reviewOnSynchronize Boolean   @default(true) @map("review_on_synchronize")
+  reviewOnReopened    Boolean   @default(true) @map("review_on_reopened")
+  maxComments         Int       @default(6) @map("max_comments")
+  reviewTone          String    @default("balanced") @map("review_tone") @db.VarChar(50)
+  ignoredPatterns     String    @default("") @map("ignored_patterns")
+  createdAt           DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt           DateTime? @default(now()) @map("updated_at") @db.Timestamp(6)
+
+  repository Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@map("repository_settings")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  githubId  BigInt    @unique @map("github_id")
+  username  String    @db.VarChar(255)
+  email     String?   @db.VarChar(255)
+  avatarUrl String?   @map("avatar_url") @db.VarChar(500)
+  role      String    @default("viewer") @db.VarChar(50)
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+  lastLogin DateTime? @default(now()) @map("last_login") @db.Timestamp(6)
+  installations UserInstallation[]
+
+  @@map("users")
 }
 
 model PullRequest {

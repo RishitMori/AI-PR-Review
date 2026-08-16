@@ -12,6 +12,10 @@ const baseEnvSchema = z.object({
   GITHUB_APP_ID: z.string().default(''),
   GITHUB_PRIVATE_KEY: z.string().default(''),
   GITHUB_WEBHOOK_SECRET: z.string().default(''),
+  GITHUB_CLIENT_ID: z.string().default(''),
+  GITHUB_CLIENT_SECRET: z.string().default(''),
+  GITHUB_CALLBACK_URL: z.string().url().default('http://localhost:3000/auth/github/callback'),
+  GITHUB_APP_SLUG: z.string().default(''),
   LLM_PROVIDER: z.literal('openrouter').default('openrouter'),
   OPENROUTER_API_KEY: z.string().default(''),
   OPENROUTER_MODEL: z.string().min(1).default('openrouter/free'),
@@ -22,7 +26,11 @@ const baseEnvSchema = z.object({
   MAX_DIFF_CHARS: z.coerce.number().int().positive().default(25000),
   MAX_REVIEW_COMMENTS: z.coerce.number().int().positive().default(6),
   LLM_DAILY_LIMIT: z.coerce.number().int().positive().default(40),
-  LLM_MINUTE_LIMIT: z.coerce.number().int().positive().default(5)
+  LLM_MINUTE_LIMIT: z.coerce.number().int().positive().default(5),
+  JWT_SECRET: z.string().default(''),
+  JWT_EXPIRY_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 7),
+  SESSION_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60 * 5),
+  COOKIE_SECURE: z.coerce.boolean().default(false)
 });
 
 export const config = baseEnvSchema.parse(process.env);
@@ -38,7 +46,10 @@ export function assertRuntimeConfig() {
     GITHUB_APP_ID: z.string().min(1, 'GITHUB_APP_ID is required'),
     GITHUB_PRIVATE_KEY: z.string().min(1, 'GITHUB_PRIVATE_KEY is required'),
     GITHUB_WEBHOOK_SECRET: z.string().min(1, 'GITHUB_WEBHOOK_SECRET is required'),
-    OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required')
+    GITHUB_CLIENT_ID: z.string().min(1, 'GITHUB_CLIENT_ID is required'),
+    GITHUB_CLIENT_SECRET: z.string().min(1, 'GITHUB_CLIENT_SECRET is required'),
+    OPENROUTER_API_KEY: z.string().min(1, 'OPENROUTER_API_KEY is required'),
+    JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters')
   });
 
   runtimeSchema.parse(config);

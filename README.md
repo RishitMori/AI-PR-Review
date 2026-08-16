@@ -18,6 +18,8 @@ This version intentionally does not include a dashboard, GitHub OAuth login, or 
 - Duplicate prevention per repo + PR number + head SHA
 - Updates the previous bot summary comment on the same PR when a new commit is reviewed
 - Stores failed review error details in PostgreSQL
+- GitHub OAuth dashboard login with HTTP-only JWT cookie
+- React dashboard served from `/dashboard`
 - Diff filtering for lockfiles, generated folders, and binary assets
 - Summary PR comment posting
 - Read-only review inspection APIs
@@ -91,6 +93,9 @@ REDIS_URL=redis://localhost:6379
 GITHUB_APP_ID=
 GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
 GITHUB_WEBHOOK_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+GITHUB_CALLBACK_URL=http://localhost:3000/auth/github/callback
 
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openrouter/free
@@ -98,6 +103,9 @@ OPENROUTER_FALLBACK_MODELS=
 OPENROUTER_MAX_TOKENS=900
 LLM_DAILY_LIMIT=40
 LLM_MINUTE_LIMIT=5
+JWT_SECRET=at-least-32-random-characters
+JWT_EXPIRY_SECONDS=604800
+COOKIE_SECURE=false
 ```
 
 For the private key, keep newline characters as `\n` if you store it on one line.
@@ -170,6 +178,18 @@ Health check:
 
 ```powershell
 Invoke-RestMethod http://localhost:3000/health
+```
+
+Dashboard:
+
+```text
+http://localhost:3000/dashboard
+```
+
+GitHub OAuth callback URL for local development:
+
+```text
+http://localhost:3000/auth/github/callback
 ```
 
 ## 6. Expose Webhook Locally
@@ -300,7 +320,9 @@ npm run start:worker
 ## Main Files
 
 - `src/server.ts` - Express server
+- `dashboard/` - React dashboard
 - `src/routes/webhook.ts` - GitHub webhook endpoint
+- `src/routes/auth.ts` - GitHub OAuth login/logout/session routes
 - `src/workers/review.worker.ts` - BullMQ worker
 - `src/services/github.service.ts` - GitHub App/API calls
 - `src/services/llm.service.ts` - OpenRouter review call

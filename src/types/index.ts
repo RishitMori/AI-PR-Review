@@ -25,4 +25,15 @@ export interface ReviewJobData {
   prBody: string;
   prAuthor: string;
   headSha: string;
+  reviewTone?: 'light' | 'balanced' | 'strict';
+  maxReviewComments?: number;
+  ignoredPatterns?: string[];
+}
+
+export interface AuthUser {
+  userId: number;
+  githubId: string;
+  username: string;
+  avatarUrl?: string | null;
+  role: 'owner' | 'viewer';
 }

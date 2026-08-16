@@ -4,15 +4,16 @@ const ignoredPathPatterns = [
   /\.(png|jpe?g|gif|webp|ico|pdf|zip|gz|mp4|mov)$/i
 ];
 
-export function isIgnoredPath(path: string) {
-  return ignoredPathPatterns.some((pattern) => pattern.test(path));
+export function isIgnoredPath(path: string, customPatterns: string[] = []) {
+  return ignoredPathPatterns.some((pattern) => pattern.test(path)) || customPatterns.some((pattern) => matchesSimplePattern(path, pattern));
 }
 
-export function filterAndLimitDiff(rawDiff: string, maxChars: number) {
+export function filterAndLimitDiff(rawDiff: string, maxChars: number, options: { ignoredPatterns?: string[] } = {}) {
   const fileBlocks = rawDiff.split(/^diff --git /m);
   const keptBlocks: string[] = [];
   const skippedFiles: string[] = [];
   const changedFiles: string[] = [];
+  const customPatterns = options.ignoredPatterns ?? [];
 
   for (const block of fileBlocks) {
     if (!block.trim()) continue;
@@ -20,7 +21,7 @@ export function filterAndLimitDiff(rawDiff: string, maxChars: number) {
     const pathMatch = normalizedBlock.match(/^diff --git a\/(.+?) b\/(.+)$/m);
     const filePath = pathMatch?.[2] ?? '';
 
-    if (filePath && isIgnoredPath(filePath)) {
+    if (filePath && isIgnoredPath(filePath, customPatterns)) {
       skippedFiles.push(filePath);
       continue;
     }
@@ -43,4 +44,19 @@ export function filterAndLimitDiff(rawDiff: string, maxChars: number) {
     skippedFiles,
     changedFiles
   };
+}
+
+function matchesSimplePattern(path: string, pattern: string) {
+  const normalizedPath = path.replace(/\\/g, '/');
+  const normalizedPattern = pattern.replace(/\\/g, '/').trim();
+  if (!normalizedPattern) return false;
+  if (!normalizedPattern.includes('*')) {
+    return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern.replace(/\/$/, '')}/`);
+  }
+
+  const escaped = normalizedPattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${escaped}$`, 'i').test(normalizedPath);
 }

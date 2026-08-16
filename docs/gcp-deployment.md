@@ -82,14 +82,34 @@ REDIS_URL=redis://REDIS_PRIVATE_IP:6379
 
 ## 7. Deploy API Service
 
+Before deploying the dashboard/auth version, add these extra secrets:
+
+```bash
+printf '%s' 'YOUR_GITHUB_CLIENT_ID' | gcloud secrets create GITHUB_CLIENT_ID --data-file=-
+printf '%s' 'YOUR_GITHUB_CLIENT_SECRET' | gcloud secrets create GITHUB_CLIENT_SECRET --data-file=-
+printf '%s' 'A_RANDOM_32_PLUS_CHARACTER_SECRET' | gcloud secrets create JWT_SECRET --data-file=-
+```
+
+If the secrets already exist, use:
+
+```bash
+printf '%s' 'NEW_VALUE' | gcloud secrets versions add SECRET_NAME --data-file=-
+```
+
+In your GitHub App OAuth settings, set callback URL to:
+
+```text
+https://YOUR_CLOUD_RUN_API_URL/auth/github/callback
+```
+
 ```bash
 gcloud run deploy ai-pr-review-api \
   --image $IMAGE \
   --region $REGION \
   --allow-unauthenticated \
   --add-cloudsql-instances PROJECT_ID:REGION:INSTANCE_NAME \
-  --set-env-vars NODE_ENV=production,OPENROUTER_MODEL=openrouter/free,OPENROUTER_FALLBACK_MODELS=,OPENROUTER_MAX_TOKENS=900,MAX_DIFF_CHARS=25000,MAX_REVIEW_COMMENTS=6,LLM_DAILY_LIMIT=40,LLM_MINUTE_LIMIT=5 \
-  --set-secrets DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,GITHUB_APP_ID=GITHUB_APP_ID:latest,GITHUB_PRIVATE_KEY=GITHUB_PRIVATE_KEY:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest
+  --set-env-vars NODE_ENV=production,PUBLIC_BASE_URL=https://YOUR_CLOUD_RUN_API_URL,GITHUB_CALLBACK_URL=https://YOUR_CLOUD_RUN_API_URL/auth/github/callback,COOKIE_SECURE=true,OPENROUTER_MODEL=openrouter/free,OPENROUTER_FALLBACK_MODELS=,OPENROUTER_MAX_TOKENS=900,MAX_DIFF_CHARS=25000,MAX_REVIEW_COMMENTS=6,LLM_DAILY_LIMIT=40,LLM_MINUTE_LIMIT=5 \
+  --set-secrets DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,GITHUB_APP_ID=GITHUB_APP_ID:latest,GITHUB_PRIVATE_KEY=GITHUB_PRIVATE_KEY:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest,GITHUB_CLIENT_ID=GITHUB_CLIENT_ID:latest,GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET:latest,JWT_SECRET=JWT_SECRET:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest
 ```
 
 Create those secrets first in Secret Manager, or set env vars manually in the Cloud Run console.
@@ -122,7 +142,7 @@ gcloud run worker-pools deploy ai-pr-review-worker \
   --command node \
   --args dist/workers/review.worker.js \
   --set-env-vars NODE_ENV=production,OPENROUTER_MODEL=openrouter/free,OPENROUTER_FALLBACK_MODELS=,OPENROUTER_MAX_TOKENS=900,MAX_DIFF_CHARS=25000,MAX_REVIEW_COMMENTS=6,LLM_DAILY_LIMIT=40,LLM_MINUTE_LIMIT=5 \
-  --set-secrets DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,GITHUB_APP_ID=GITHUB_APP_ID:latest,GITHUB_PRIVATE_KEY=GITHUB_PRIVATE_KEY:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest
+  --set-secrets DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,GITHUB_APP_ID=GITHUB_APP_ID:latest,GITHUB_PRIVATE_KEY=GITHUB_PRIVATE_KEY:latest,GITHUB_WEBHOOK_SECRET=GITHUB_WEBHOOK_SECRET:latest,GITHUB_CLIENT_ID=GITHUB_CLIENT_ID:latest,GITHUB_CLIENT_SECRET=GITHUB_CLIENT_SECRET:latest,JWT_SECRET=JWT_SECRET:latest,OPENROUTER_API_KEY=OPENROUTER_API_KEY:latest
 ```
 
 If worker pools are unavailable in your region or account, use a second Cloud Run service with min instances set to 1 and a tiny worker health server, or deploy the worker to Compute Engine.
@@ -142,6 +162,12 @@ https://ai-pr-review-api-xxxxx.a.run.app/webhook
 ```
 
 Then trigger a PR event and check Cloud Run logs.
+
+Dashboard URL:
+
+```text
+https://ai-pr-review-api-xxxxx.a.run.app/dashboard
+```
 
 ## Redeploy After Code Changes
 

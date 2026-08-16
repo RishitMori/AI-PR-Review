@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { config } from '../config.js';
-import { recordWebhookEvent, upsertPullRequest, upsertRepository } from '../db/queries.js';
+import { getRepositorySettings, markInstallationSuspended, recordWebhookEvent, upsertGitHubInstallation, upsertPullRequest, upsertRepository } from '../db/queries.js';
 import { reviewJobId, reviewQueue } from '../queue/review.queue.js';
 import type { ReviewJobData } from '../types/index.js';
 import { verifyWebhookSignature } from '../utils/webhook-verify.js';
@@ -29,6 +29,11 @@ webhookRouter.post('/webhook', async (req, res, next) => {
       prNumber: payload.pull_request?.number
     });
 
+    if (eventName === 'installation') {
+      await handleInstallationEvent(payload);
+      return res.status(202).json({ ok: true, installation: true });
+    }
+
     if (eventName !== 'pull_request') {
       return res.status(202).json({ ok: true, ignored: true, reason: `Ignored ${eventName} event.` });
     }
@@ -44,10 +49,16 @@ webhookRouter.post('/webhook', async (req, res, next) => {
     const jobData = toReviewJobData(deliveryId, payload);
     const repoId = await upsertRepository({
       githubId: jobData.repoGithubId,
+      githubInstallationId: jobData.installationId,
       owner: jobData.repoOwner,
       name: jobData.repoName,
       fullName: jobData.repoFullName
     });
+    const settings = await getRepositorySettings(repoId);
+    const actionEnabled =
+      (payload.action === 'opened' && settings.reviewOnOpened) ||
+      (payload.action === 'synchronize' && settings.reviewOnSynchronize) ||
+      (payload.action === 'reopened' && settings.reviewOnReopened);
 
     await upsertPullRequest({
       repoId,
@@ -57,6 +68,22 @@ webhookRouter.post('/webhook', async (req, res, next) => {
       headSha: jobData.headSha,
       status: 'pending'
     });
+
+    if (!settings.enabled || !actionEnabled) {
+      return res.status(202).json({
+        ok: true,
+        queued: false,
+        ignored: true,
+        reason: !settings.enabled ? 'Repository reviews are disabled.' : `Review on ${payload.action} is disabled for this repository.`
+      });
+    }
+
+    jobData.reviewTone = settings.reviewTone as 'light' | 'balanced' | 'strict';
+    jobData.maxReviewComments = settings.maxComments;
+    jobData.ignoredPatterns = settings.ignoredPatterns
+      .split('\n')
+      .map((pattern) => pattern.trim())
+      .filter(Boolean);
 
     const job = await reviewQueue.add('review-pr', jobData, {
       jobId: reviewJobId(jobData)
@@ -89,4 +116,33 @@ function toReviewJobData(deliveryId: string, payload: any): ReviewJobData {
     prAuthor: String(payload.pull_request.user?.login ?? ''),
     headSha: String(payload.pull_request.head?.sha ?? '')
   };
+}
+
+async function handleInstallationEvent(payload: any) {
+  const installationId = Number(payload.installation?.id);
+  if (!installationId) return;
+
+  if (['deleted', 'suspend'].includes(payload.action)) {
+    await markInstallationSuspended(installationId);
+    return;
+  }
+
+  await upsertGitHubInstallation({
+    githubInstallationId: installationId,
+    accountGithubId: payload.installation?.account?.id ? Number(payload.installation.account.id) : null,
+    accountLogin: payload.installation?.account?.login ?? null,
+    accountType: payload.installation?.account?.type ?? null
+  });
+
+  for (const repository of payload.repositories ?? payload.repositories_added ?? []) {
+    const fullName = String(repository.full_name ?? '');
+    const [owner, nameFromFullName] = fullName.split('/');
+    await upsertRepository({
+      githubId: Number(repository.id),
+      githubInstallationId: installationId,
+      owner: owner || String(repository.owner?.login ?? ''),
+      name: String(repository.name ?? nameFromFullName ?? ''),
+      fullName
+    });
+  }
 }

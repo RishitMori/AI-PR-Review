@@ -20,4 +20,5 @@ COPY prisma ./prisma
 RUN pnpm install --frozen-lockfile --prod
 RUN pnpm exec prisma generate
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/dashboard/dist ./dashboard/dist
 CMD ["node", "dist/server.js"]

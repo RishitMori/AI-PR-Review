@@ -5,7 +5,7 @@ interface GitHubApiErrorBody {
   message?: string;
 }
 
-async function githubRequest<T>(url: string, options: RequestInit & { token?: string } = {}) {
+export async function githubRequest<T>(url: string, options: RequestInit & { token?: string } = {}) {
   const headers = new Headers(options.headers);
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/vnd.github+json');
@@ -130,4 +130,30 @@ export async function updatePrSummaryComment(input: {
       body: JSON.stringify({ body: input.body })
     }
   );
+}
+
+export async function listUserInstallations(token: string) {
+  return githubRequest<{
+    installations: Array<{
+      id: number;
+      account?: {
+        id?: number;
+        login?: string;
+        type?: string;
+      } | null;
+    }>;
+  }>('https://api.github.com/user/installations', { token });
+}
+
+export async function listUserInstallationRepositories(token: string, installationId: number) {
+  return githubRequest<{
+    repositories: Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      owner?: {
+        login?: string;
+      } | null;
+    }>;
+  }>(`https://api.github.com/user/installations/${installationId}/repositories`, { token });
 }

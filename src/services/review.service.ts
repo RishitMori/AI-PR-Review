@@ -18,6 +18,7 @@ import { reviewDiffWithLlm } from './llm.service.js';
 export async function processReviewJob(data: ReviewJobData) {
   const repoId = await upsertRepository({
     githubId: data.repoGithubId,
+    githubInstallationId: data.installationId,
     owner: data.repoOwner,
     name: data.repoName,
     fullName: data.repoFullName
@@ -51,7 +52,9 @@ export async function processReviewJob(data: ReviewJobData) {
       prNumber: data.prNumber
     });
 
-    const diffResult = filterAndLimitDiff(rawDiff, config.MAX_DIFF_CHARS);
+    const diffResult = filterAndLimitDiff(rawDiff, config.MAX_DIFF_CHARS, {
+      ignoredPatterns: data.ignoredPatterns ?? []
+    });
     if (!diffResult.diff.trim()) {
       throw new Error('No reviewable diff remained after filtering generated/binary files.');
     }
@@ -62,7 +65,9 @@ export async function processReviewJob(data: ReviewJobData) {
       diff: diffResult.diff,
       changedFiles: diffResult.changedFiles,
       truncated: diffResult.truncated,
-      skippedFiles: diffResult.skippedFiles
+      skippedFiles: diffResult.skippedFiles,
+      maxComments: data.maxReviewComments,
+      reviewTone: data.reviewTone
     });
 
     await saveReview({

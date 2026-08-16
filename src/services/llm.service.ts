@@ -35,13 +35,15 @@ export async function reviewDiffWithLlm(input: {
   changedFiles: string[];
   truncated: boolean;
   skippedFiles: string[];
+  maxComments?: number;
+  reviewTone?: 'light' | 'balanced' | 'strict';
 }) {
   await enforceFreeTierLimits();
 
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: buildSystemPrompt()
+      content: buildSystemPrompt(input)
     },
     {
       role: 'user',
@@ -148,14 +150,22 @@ async function incrementWithExpiry(key: string, ttlSeconds: number) {
   return count;
 }
 
-function buildSystemPrompt() {
+function buildSystemPrompt(input: { maxComments?: number; reviewTone?: 'light' | 'balanced' | 'strict' }) {
+  const maxComments = Math.min(Math.max(input.maxComments ?? config.MAX_REVIEW_COMMENTS, 1), 20);
+  const toneInstruction = {
+    light: 'Use a light review tone. Only flag clear correctness, security, or reliability risks.',
+    balanced: 'Use a balanced review tone. Flag important bugs, security risks, and useful maintainability improvements.',
+    strict: 'Use a strict review tone. Be more detailed, but still only comment when the diff clearly supports the issue.'
+  }[input.reviewTone ?? 'balanced'];
+
   return [
     'You are reviewing a pull request as a helpful senior engineer.',
+    toneInstruction,
     'Only review the code changed in the provided git diff. Do not comment on files, functions, dependencies, or architecture that are not touched by this diff.',
     'Only make actionable suggestions when they are clearly supported by added or modified lines in the diff.',
     'Do not give generic advice. Do not ask for unrelated tests, refactors, formatting, or style changes unless the changed lines introduce that specific problem.',
     'If there are no concrete issues in the changed code, return an empty comments array and a short positive summary.',
-    `Return at most ${config.MAX_REVIEW_COMMENTS} comments.`,
+    `Return at most ${maxComments} comments.`,
     'Return ONLY valid JSON with this exact shape:',
     '{"overall_score": number, "summary": string, "comments": [{"file": string, "line": number|null, "severity": "critical|warning|suggestion|praise", "comment": string}]}'
   ].join('\n');

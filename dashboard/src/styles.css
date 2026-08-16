@@ -1,0 +1,123 @@
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.dashboard-shell {
+  max-width: none;
+}
+
+.dashboard-shell .MuiGrid-container {
+  width: 100%;
+  margin-left: 0;
+}
+
+.dashboard-shell .MuiGrid-item {
+  min-width: 0;
+}
+
+.dashboard-user-actions .MuiButton-root {
+  min-height: 38px;
+  height: 38px;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
+.landing-bg {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(37, 99, 235, 0.14), transparent 30%),
+    radial-gradient(circle at 92% 6%, rgba(15, 159, 122, 0.16), transparent 26%),
+    linear-gradient(180deg, #f8fbff 0%, #f6f8fc 54%, #ffffff 100%);
+}
+
+.brand-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+  margin-right: auto;
+  padding: 0;
+}
+
+.brand-button:hover {
+  color: #2563eb;
+}
+
+.brand-logo {
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.24);
+}
+
+.preview-card {
+  overflow: hidden;
+}
+
+.health-track {
+  background: #e3e9ef;
+  border-radius: 999px;
+  height: 12px;
+  overflow: hidden;
+}
+
+.health-fill {
+  background: linear-gradient(90deg, #2563eb, #0f9f7a);
+  border-radius: inherit;
+  height: 100%;
+  min-width: 8px;
+}
+
+.setup-row {
+  background: #f8fbff;
+  border: 1px solid #e3e9ef;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.window-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.window-dot.red {
+  background: #ff6b6b;
+}
+
+.window-dot.yellow {
+  background: #f59f00;
+}
+
+.window-dot.green {
+  background: #12b886;
+}
+
+@media (max-width: 600px) {
+  .MuiToolbar-root {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-bottom: 16px;
+    padding-top: 16px;
+  }
+
+  .dashboard-user-actions {
+    width: 100%;
+  }
+
+  .dashboard-user-actions .MuiButton-root {
+    flex: 1 1 auto;
+  }
+}

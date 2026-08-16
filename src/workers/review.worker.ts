@@ -17,7 +17,8 @@ const worker = new Worker<ReviewJobData>(
   },
   {
     connection: redisConnection,
-    concurrency: 2
+    concurrency: 2,
+    stalledInterval: 120000
   }
 );
 

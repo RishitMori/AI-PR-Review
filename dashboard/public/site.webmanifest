@@ -1,0 +1,23 @@
+{
+  "name": "ReviewPilot",
+  "short_name": "ReviewPilot",
+  "description": "AI pull request reviews for faster, calmer code review.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8fc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/brand-icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand-mark.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
