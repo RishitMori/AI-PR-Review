@@ -191,4 +191,35 @@ export MIGRATE_JOB="ai-pr-review-migrate"
 export IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/app:latest"
 export GITHUB_APP_SLUG="your-github-app-slug"
 export SESSION_REFRESH_INTERVAL_SECONDS="3600"
+export WORKER_INSTANCES="1"
+```
+
+To pause background review processing and reduce Redis worker activity, deploy with:
+
+```bash
+export WORKER_INSTANCES="0"
+bash scripts/gcp-redeploy.sh
+```
+
+To resume review processing:
+
+```bash
+export WORKER_INSTANCES="1"
+bash scripts/gcp-redeploy.sh
+```
+
+You can also stop only the worker pool without redeploying everything:
+
+```bash
+export PROJECT_ID="your-gcp-project-id"
+export REGION="asia-south1"
+
+bash scripts/gcp-stop-worker.sh
+```
+
+To start the worker again later, redeploy with:
+
+```bash
+export WORKER_INSTANCES="1"
+bash scripts/gcp-redeploy.sh
 ```

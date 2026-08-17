@@ -10,6 +10,7 @@ API_SERVICE="${API_SERVICE:-ai-pr-review-api}"
 WORKER_POOL="${WORKER_POOL:-ai-pr-review-worker}"
 MIGRATE_JOB="${MIGRATE_JOB:-ai-pr-review-migrate}"
 IMAGE="${IMAGE:-$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/app:latest}"
+WORKER_INSTANCES="${WORKER_INSTANCES:-1}"
 
 EXISTING_API_URL="$(gcloud run services describe "$API_SERVICE" --region "$REGION" --format='value(status.url)' 2>/dev/null || true)"
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-$EXISTING_API_URL}"
@@ -25,6 +26,7 @@ COMMON_SECRETS="DATABASE_URL=DATABASE_URL:latest,REDIS_URL=REDIS_URL:latest,GITH
 echo "Using project: $PROJECT_ID"
 echo "Using region: $REGION"
 echo "Using image: $IMAGE"
+echo "Using worker instances: $WORKER_INSTANCES"
 
 gcloud config set project "$PROJECT_ID" >/dev/null
 
@@ -76,6 +78,7 @@ echo "Deploying worker pool..."
 gcloud run worker-pools deploy "$WORKER_POOL" \
   --image "$IMAGE" \
   --region "$REGION" \
+  --instances "$WORKER_INSTANCES" \
   --add-cloudsql-instances "$INSTANCE_CONNECTION_NAME" \
   --command node \
   --args dist/workers/review.worker.js \
