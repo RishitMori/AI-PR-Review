@@ -9,6 +9,7 @@ import { reviewsRouter } from './routes/reviews.js';
 import { webhookRouter } from './routes/webhook.js';
 import { disconnectPrisma } from './db/prisma.js';
 import { redisConnection } from './queue/redis.js';
+import { logger } from './utils/logger.js';
 
 assertRuntimeConfig();
 
@@ -39,18 +40,18 @@ if (existsSync(dashboardDist)) {
 }
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(error);
+  logger.error(error);
   res.status(500).json({
     error: error instanceof Error ? error.message : 'Internal server error'
   });
 });
 
 const server = app.listen(config.PORT, () => {
-  console.log(`AI PR Review Bot listening on port ${config.PORT}`);
+  logger.info(`AI PR Review Bot listening on port ${config.PORT}`);
 });
 
 async function shutdown() {
-  console.log('Shutting down server...');
+  logger.info('Shutting down server...');
   server.close(async () => {
     await redisConnection.quit();
     await disconnectPrisma();

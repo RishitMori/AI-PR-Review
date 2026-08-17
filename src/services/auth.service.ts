@@ -5,6 +5,7 @@ import { prisma } from '../db/prisma.js';
 import { redisConnection } from '../queue/redis.js';
 import { listUserInstallationRepositories, listUserInstallations } from './github.service.js';
 import type { AuthUser } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 interface GitHubTokenResponse {
   access_token?: string;
@@ -122,7 +123,7 @@ async function syncUserInstallations(userId: number, accessToken: string) {
       }
     }
   } catch (error) {
-    console.warn('Could not sync GitHub installations for signed-in user.', error);
+    logger.warn('Could not sync GitHub installations for signed-in user.', error);
   }
 }
 

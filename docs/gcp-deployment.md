@@ -223,3 +223,26 @@ To start the worker again later, redeploy with:
 export WORKER_INSTANCES="1"
 bash scripts/gcp-start-worker.sh
 ```
+
+## Reduce Cloud Logging Cost
+
+Production deploys default to:
+
+```bash
+LOG_LEVEL=silent
+```
+
+This suppresses app `console.log`, `console.warn`, and `console.error` output. Cloud Run request logs and required audit logs can still be produced by Google Cloud.
+
+To stop storing future non-required logs in the `_Default` bucket:
+
+```bash
+export PROJECT_ID="your-gcp-project-id"
+bash scripts/gcp-disable-logging.sh
+```
+
+To enable logging again for debugging:
+
+```bash
+bash scripts/gcp-enable-logging.sh
+```

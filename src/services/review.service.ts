@@ -14,6 +14,7 @@ import { filterAndLimitDiff } from '../utils/diff.js';
 import { formatSummaryComment } from './comment-format.service.js';
 import { fetchPullRequestDiff, getInstallationToken, postPrSummaryComment, updatePrSummaryComment } from './github.service.js';
 import { reviewDiffWithLlm } from './llm.service.js';
+import { logger } from '../utils/logger.js';
 
 export async function processReviewJob(data: ReviewJobData) {
   const repoId = await upsertRepository({
@@ -131,7 +132,7 @@ async function upsertPrSummaryComment(input: {
 
       return { id: updatedComment.id, updated: true };
     } catch (error) {
-      console.warn(`Could not update previous PR summary comment ${input.previousCommentId}; posting a new one instead.`, error);
+      logger.warn(`Could not update previous PR summary comment ${input.previousCommentId}; posting a new one instead.`, error);
     }
   }
 
