@@ -24,7 +24,11 @@ const worker = new Worker<ReviewJobData>(
 );
 
 worker.on('failed', (job, error) => {
-  logger.error(`Review job ${job?.id ?? 'unknown'} failed:`, error);
+  logger.error(`Review job ${job?.id ?? 'unknown'} failed.`, error);
+});
+
+worker.on('error', (error) => {
+  logger.error('Review worker error.', error);
 });
 
 async function shutdown() {

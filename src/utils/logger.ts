@@ -14,15 +14,34 @@ function enabled(level: keyof typeof levels) {
 
 export const logger = {
   error: (...args: unknown[]) => {
-    if (enabled('error')) console.error(...args);
+    if (enabled('error')) console.error(...args.map(toLogSafeValue));
   },
   warn: (...args: unknown[]) => {
-    if (enabled('warn')) console.warn(...args);
+    if (enabled('warn')) console.warn(...args.map(toLogSafeValue));
   },
   info: (...args: unknown[]) => {
-    if (enabled('info')) console.log(...args);
+    if (enabled('info')) console.log(...args.map(toLogSafeValue));
   },
   debug: (...args: unknown[]) => {
-    if (enabled('debug')) console.debug(...args);
+    if (enabled('debug')) console.debug(...args.map(toLogSafeValue));
   }
 };
+
+function toLogSafeValue(value: unknown) {
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message
+    };
+  }
+
+  if (Buffer.isBuffer(value)) {
+    return '[buffer redacted]';
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+
+  return '[object redacted]';
+}

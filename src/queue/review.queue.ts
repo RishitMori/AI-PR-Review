@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { redisConnection } from './redis.js';
 import type { ReviewJobData } from '../types/index.js';
+import { logger } from '../utils/logger.js';
 
 export const reviewQueue = new Queue<ReviewJobData>('review-pr', {
   connection: redisConnection,
@@ -17,6 +18,10 @@ export const reviewQueue = new Queue<ReviewJobData>('review-pr', {
       age: 60 * 60 * 24 * 14
     }
   }
+});
+
+reviewQueue.on('error', (error) => {
+  logger.error('Review queue error.', error);
 });
 
 export function reviewJobId(data: Pick<ReviewJobData, 'repoFullName' | 'prNumber' | 'headSha'>) {
