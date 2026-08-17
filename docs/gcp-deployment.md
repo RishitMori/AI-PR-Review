@@ -221,5 +221,5 @@ To start the worker again later, redeploy with:
 
 ```bash
 export WORKER_INSTANCES="1"
-bash scripts/gcp-redeploy.sh
+bash scripts/gcp-start-worker.sh
 ```
