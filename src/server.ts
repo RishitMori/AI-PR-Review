@@ -23,20 +23,24 @@ app.use(healthRouter);
 app.use(authRouter);
 app.use(reviewsRouter);
 app.use(webhookRouter);
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API route not found.' });
+});
+app.use('/auth', (_req, res) => {
+  res.status(404).json({ error: 'Auth route not found.' });
+});
 
 const dashboardDist = join(process.cwd(), 'dashboard', 'dist');
 if (existsSync(dashboardDist)) {
+  const sendApp = (_req: express.Request, res: express.Response) => {
+    res.sendFile(join(dashboardDist, 'index.html'));
+  };
+
   app.use(express.static(dashboardDist));
   app.use('/dashboard', express.static(dashboardDist));
-  app.get('/dashboard/*', (_req, res) => {
-    res.sendFile(join(dashboardDist, 'index.html'));
-  });
-  app.get(['/terms', '/terms/', '/privacy', '/privacy/', '/contact', '/contact/'], (_req, res) => {
-    res.sendFile(join(dashboardDist, 'index.html'));
-  });
-  app.get('/', (_req, res) => {
-    res.sendFile(join(dashboardDist, 'index.html'));
-  });
+  app.get(['/dashboard', '/dashboard/*', '/terms', '/terms/*', '/privacy', '/privacy/*', '/contact', '/contact/*', '/switch-github', '/switch-github/*'], sendApp);
+  app.get('/', sendApp);
+  app.get('*', sendApp);
 }
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

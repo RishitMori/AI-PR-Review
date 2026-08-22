@@ -31,7 +31,9 @@ const baseEnvSchema = z.object({
   JWT_SECRET: z.string().default(''),
   JWT_EXPIRY_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 7),
   SESSION_REFRESH_INTERVAL_SECONDS: z.coerce.number().int().positive().default(60 * 5),
-  COOKIE_SECURE: z.coerce.boolean().default(false)
+  COOKIE_SECURE: z.coerce.boolean().default(false),
+  RAZORPAY_PAYMENT_LINK_URL: z.string().url().or(z.literal('')).default(''),
+  RAZORPAY_CUSTOMER_PORTAL_URL: z.string().url().or(z.literal('')).default('')
 });
 
 export const config = baseEnvSchema.parse(process.env);

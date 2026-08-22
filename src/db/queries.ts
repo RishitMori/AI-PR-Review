@@ -82,6 +82,17 @@ export async function linkUserInstallation(userId: number, installationId: numbe
   });
 }
 
+export async function replaceUserInstallations(userId: number, installationIds: number[]) {
+  await prisma.userInstallation.deleteMany({
+    where: {
+      userId,
+      installationId: {
+        notIn: installationIds.length > 0 ? installationIds : [-1]
+      }
+    }
+  });
+}
+
 export async function markInstallationSuspended(githubInstallationId: number) {
   await prisma.gitHubInstallation.updateMany({
     where: { githubInstallationId: BigInt(githubInstallationId) },

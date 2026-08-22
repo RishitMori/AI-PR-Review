@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import { linkUserInstallation, upsertGitHubInstallation, upsertRepository } from '../db/queries.js';
+import { linkUserInstallation, replaceUserInstallations, upsertGitHubInstallation, upsertRepository } from '../db/queries.js';
 import { prisma } from '../db/prisma.js';
 import { redisConnection } from '../queue/redis.js';
 import { listUserInstallationRepositories, listUserInstallations } from './github.service.js';
@@ -26,11 +26,13 @@ interface GitHubEmailResponse {
   verified: boolean;
 }
 
-export function getGitHubAuthUrl() {
+export function getGitHubAuthUrl(state: string) {
   const url = new URL('https://github.com/login/oauth/authorize');
   url.searchParams.set('client_id', config.GITHUB_CLIENT_ID);
   url.searchParams.set('redirect_uri', config.GITHUB_CALLBACK_URL);
   url.searchParams.set('scope', 'read:user user:email');
+  url.searchParams.set('state', state);
+  url.searchParams.set('prompt', 'select_account');
   return url.toString();
 }
 
@@ -99,6 +101,7 @@ export async function completeGitHubOAuth(code: string) {
 async function syncUserInstallations(userId: number, accessToken: string) {
   try {
     const installations = await listUserInstallations(accessToken);
+    const activeInstallationIds: number[] = [];
 
     for (const installation of installations.installations ?? []) {
       const savedInstallation = await upsertGitHubInstallation({
@@ -108,6 +111,7 @@ async function syncUserInstallations(userId: number, accessToken: string) {
         accountType: installation.account?.type ?? null
       });
 
+      activeInstallationIds.push(savedInstallation.id);
       await linkUserInstallation(userId, savedInstallation.id);
 
       const repositories = await listUserInstallationRepositories(accessToken, installation.id);
@@ -122,6 +126,8 @@ async function syncUserInstallations(userId: number, accessToken: string) {
         });
       }
     }
+
+    await replaceUserInstallations(userId, activeInstallationIds);
   } catch (error) {
     logger.warn('Could not sync GitHub installations for signed-in user.', error);
   }
@@ -178,6 +184,16 @@ export async function clearSession(userId: number) {
   await redisConnection.del(sessionKey(userId));
 }
 
+export async function clearSessionAndRevokeGitHub(userId: number) {
+  const session = await redisConnection.get(sessionKey(userId));
+  const sessionJson = session ? safeParseSession(session) : null;
+  await redisConnection.del(sessionKey(userId));
+
+  if (!sessionJson?.githubAccessToken) return;
+
+  await revokeGitHubAuthorization(sessionJson.githubAccessToken);
+}
+
 function sessionKey(userId: number) {
   return `session:${userId}`;
 }
@@ -223,4 +239,25 @@ async function fetchPrimaryEmail(accessToken: string) {
 
   const emails = (await response.json()) as GitHubEmailResponse[];
   return emails.find((email) => email.primary && email.verified)?.email ?? null;
+}
+
+async function revokeGitHubAuthorization(accessToken: string) {
+  if (!config.GITHUB_CLIENT_ID || !config.GITHUB_CLIENT_SECRET) return;
+
+  const credentials = Buffer.from(`${config.GITHUB_CLIENT_ID}:${config.GITHUB_CLIENT_SECRET}`).toString('base64');
+  const response = await fetch(`https://api.github.com/applications/${config.GITHUB_CLIENT_ID}/grant`, {
+    method: 'DELETE',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Basic ${credentials}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'ai-pr-review-bot',
+      'X-GitHub-Api-Version': '2022-11-28'
+    },
+    body: JSON.stringify({ access_token: accessToken })
+  });
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`GitHub OAuth authorization revoke failed (${response.status}).`);
+  }
 }

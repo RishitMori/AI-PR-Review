@@ -90,6 +90,19 @@ reviewsRouter.get('/api/setup', async (_req, res) => {
   });
 });
 
+reviewsRouter.get('/api/billing', async (_req, res) => {
+  const paymentReady = Boolean(config.RAZORPAY_PAYMENT_LINK_URL || config.RAZORPAY_CUSTOMER_PORTAL_URL);
+
+  res.json({
+    billing: {
+      plan_name: paymentReady ? 'Pro' : 'Free',
+      status: paymentReady ? 'ready' : 'setup_required',
+      payment_link_url: config.RAZORPAY_PAYMENT_LINK_URL || null,
+      customer_portal_url: config.RAZORPAY_CUSTOMER_PORTAL_URL || null
+    }
+  });
+});
+
 reviewsRouter.get('/api/stats', async (req, res, next) => {
   try {
     const stats = await getStats(toActor(req));
