@@ -4,6 +4,57 @@ ReviewPilot is an AI pull request review bot with a GitHub App webhook, async wo
 
 It listens to GitHub `pull_request` events, verifies the webhook signature, queues review work in Redis/BullMQ, fetches the PR diff with a GitHub App installation token, sends the diff to OpenRouter, stores the structured review in PostgreSQL, and posts a summary review comment back to the PR.
 
+## Live Demo
+
+- Landing page: `https://YOUR_PRODUCTION_URL/`
+- Dashboard: `https://YOUR_PRODUCTION_URL/dashboard`
+- Setup checklist: `https://YOUR_PRODUCTION_URL/dashboard/setup`
+- Review inbox: `https://YOUR_PRODUCTION_URL/dashboard/inbox`
+- Example reviewed PR: `ADD_PUBLIC_PR_LINK_HERE`
+
+Demo flow:
+
+1. Sign in with GitHub from the dashboard.
+2. Install the GitHub App on a test repository.
+3. Open or update a pull request.
+4. ReviewPilot receives the webhook, runs the worker, and posts inline review comments plus a PR summary comment.
+5. The dashboard shows the review history, score, comments, repository status, and setup health.
+
+## Architecture
+
+```text
+GitHub PR
+   |
+   v
+GitHub Webhook
+   |
+   v
+Express API /webhook
+   |
+   v
+BullMQ Queue
+   |
+   v
+Review Worker
+   |
+   +--> GitHub API: fetch PR diff
+   |
+   +--> OpenRouter: generate structured review
+   |
+   +--> PostgreSQL: store PR, review, comments, failures
+   |
+   +--> GitHub API: post inline comments and update PR summary comment
+   |
+   v
+React Dashboard /dashboard
+```
+
+Authentication flow:
+
+```text
+User -> GitHub OAuth -> ReviewPilot session cookie -> Redis session -> Protected dashboard APIs
+```
+
 ## What Is Included
 
 - Express + TypeScript API
@@ -16,12 +67,26 @@ It listens to GitHub `pull_request` events, verifies the webhook signature, queu
 - Redis + BullMQ async review worker
 - OpenRouter LLM review with local rate limits
 - Duplicate prevention per repo, PR number, and head SHA
+- Inline GitHub review comments for findings that map cleanly to changed lines
 - Summary PR comment posting and updating
 - React dashboard served from `/dashboard`
 - Dashboard routes for overview, inbox, repositories, setup, billing, and security
 - Per-repository review settings UI
 - Review history, comments, failure states, and stats
 - Optional Razorpay hosted billing links
+
+## Why This Project Matters
+
+ReviewPilot demonstrates production-style backend engineering in one focused product:
+
+- Secure webhook handling with GitHub HMAC verification
+- Async job processing with Redis and BullMQ
+- OAuth login with HTTP-only cookies and Redis-backed sessions
+- GitHub App installation-token flow for repository access
+- LLM integration with structured JSON parsing and local rate limits
+- PostgreSQL-backed review history and operational failure tracking
+- A recruiter-friendly dashboard for inspecting real PR review output
+- Deployment-ready architecture for API, worker, database, and Redis
 
 ## Requirements
 
@@ -268,7 +333,7 @@ https://YOUR_PRODUCTION_URL/auth/github/callback
 9. Install the GitHub App from `/dashboard/setup`.
 10. Open a PR in an installed repository.
 11. Watch the worker logs.
-12. Confirm the PR receives a ReviewPilot summary comment.
+12. Confirm the PR receives ReviewPilot inline comments and a summary comment.
 13. Confirm the dashboard shows the review in `/dashboard/inbox`.
 
 ## Dashboard Routes
@@ -415,11 +480,36 @@ See [docs/gcp-deployment.md](docs/gcp-deployment.md) for a Google Cloud Run depl
 
 ## Current Limitations
 
-- The bot posts one summary PR comment, not GitHub inline review comments.
+- Inline comments are only posted when the suggested file and line can be mapped safely to the PR diff.
 - Razorpay payment state is not synced back into the database yet.
 - Paid plan enforcement is not implemented yet.
 - Slack/Discord notifications are not implemented yet.
 - The dashboard is currently a single React entry file rather than split into route components.
+
+## Next Feature Roadmap
+
+The biggest product upgrade completed after the MVP is inline GitHub review comments. The bot now posts inline comments when a finding maps cleanly to a changed line, while keeping the summary comment as the reliable fallback.
+
+Recommended order:
+
+1. **Improve inline GitHub review comments**
+   - Store GitHub inline comment IDs in `review_comments.github_comment_id`.
+   - Add richer mapping for deleted lines and multi-line suggestions.
+   - Tune the LLM prompt to prefer changed added lines for easier mapping.
+
+2. **Razorpay webhook integration**
+   - Add a Razorpay webhook endpoint.
+   - Verify Razorpay webhook signatures.
+   - Store payment/subscription state in PostgreSQL.
+   - Unlock paid-plan limits based on payment status.
+
+3. **Slack or Discord notifications**
+   - Notify when a review completes or fails.
+   - Include PR link, score, and top findings.
+
+4. **Dashboard code split**
+   - Move large dashboard sections out of `dashboard/src/App.tsx`.
+   - Create dedicated components for overview, inbox, repositories, setup, billing, and security.
 
 ## Main Files
 
@@ -445,7 +535,7 @@ See [docs/gcp-deployment.md](docs/gcp-deployment.md) for a Google Cloud Run depl
 2. Dashboard login works with GitHub OAuth.
 3. GitHub App can be installed from `/dashboard/setup`.
 4. A real PR triggers a webhook and worker review.
-5. The PR gets a ReviewPilot summary comment.
+5. The PR gets ReviewPilot inline comments and a summary comment.
 6. `/dashboard/inbox` shows the review and saved comments.
 7. `/dashboard/repos` shows per-repository settings.
 8. README and deployment docs match the live app.

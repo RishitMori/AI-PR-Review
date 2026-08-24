@@ -132,6 +132,38 @@ export async function updatePrSummaryComment(input: {
   );
 }
 
+export async function createPullRequestReview(input: {
+  token: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
+  commitId: string;
+  body: string;
+  comments: Array<{
+    path: string;
+    line: number;
+    side: 'RIGHT';
+    body: string;
+  }>;
+}) {
+  return githubRequest<{ id: number; html_url: string }>(
+    `https://api.github.com/repos/${input.owner}/${input.repo}/pulls/${input.prNumber}/reviews`,
+    {
+      method: 'POST',
+      token: input.token,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        commit_id: input.commitId,
+        body: input.body,
+        event: 'COMMENT',
+        comments: input.comments
+      })
+    }
+  );
+}
+
 export async function listUserInstallations(token: string) {
   return githubRequest<{
     installations: Array<{
