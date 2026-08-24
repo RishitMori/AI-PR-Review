@@ -53,7 +53,7 @@ export async function reviewDiffWithLlm(input: {
 
   const rawResponse = await requestOpenRouter(messages);
   const content = extractResponseContent(rawResponse);
-  let review = tryParseReviewJson(content, input.changedFiles);
+  let review = tryParseReviewJson(content, input.changedFiles, input.maxComments);
 
   if (!review) {
     const repairResponse = await requestOpenRouter([
@@ -66,7 +66,7 @@ export async function reviewDiffWithLlm(input: {
       }
     ]);
     const repairContent = extractResponseContent(repairResponse);
-    review = tryParseReviewJson(repairContent, input.changedFiles);
+    review = tryParseReviewJson(repairContent, input.changedFiles, input.maxComments);
 
     if (!review) {
       throw new Error(`LLM response could not be parsed as valid review JSON. First response started with: ${content.slice(0, 200)}`);
@@ -164,6 +164,9 @@ function buildSystemPrompt(input: { maxComments?: number; reviewTone?: 'light' |
     'Only review the code changed in the provided git diff. Do not comment on files, functions, dependencies, or architecture that are not touched by this diff.',
     'Only make actionable suggestions when they are clearly supported by added or modified lines in the diff.',
     'Do not give generic advice. Do not ask for unrelated tests, refactors, formatting, or style changes unless the changed lines introduce that specific problem.',
+    'Consolidate repeated issues into one representative comment instead of commenting on every repeated occurrence.',
+    'Prefer critical correctness, security, data-loss, performance, and reliability issues over style or readability suggestions.',
+    'Use suggestion severity sparingly, and only for changes that meaningfully reduce future defects or maintenance risk.',
     'If there are no concrete issues in the changed code, return an empty comments array and a short positive summary.',
     `Return at most ${maxComments} comments.`,
     'Return ONLY valid JSON with this exact shape:',
@@ -193,10 +196,10 @@ function buildUserPrompt(input: {
     .join('\n');
 }
 
-function tryParseReviewJson(content: string, changedFiles: string[]): StructuredReview | null {
+function tryParseReviewJson(content: string, changedFiles: string[], maxComments?: number): StructuredReview | null {
   for (const candidate of getJsonCandidates(content)) {
     try {
-      return normalizeReviewJson(JSON.parse(candidate) as Partial<StructuredReview>, changedFiles);
+      return normalizeReviewJson(JSON.parse(candidate) as Partial<StructuredReview>, changedFiles, maxComments);
     } catch {
       // Try the next candidate.
     }
@@ -223,15 +226,16 @@ function getJsonCandidates(content: string) {
   return [...new Set(candidates)];
 }
 
-function normalizeReviewJson(parsed: Partial<StructuredReview>, changedFiles: string[]): StructuredReview {
+function normalizeReviewJson(parsed: Partial<StructuredReview>, changedFiles: string[], maxComments?: number): StructuredReview {
   if (typeof parsed.overall_score !== 'number' || typeof parsed.summary !== 'string' || !Array.isArray(parsed.comments)) {
     throw new Error('LLM response did not match the expected review JSON shape.');
   }
 
   const changedFileSet = new Set(changedFiles);
+  const commentLimit = Math.min(Math.max(maxComments ?? config.MAX_REVIEW_COMMENTS, 1), 20);
   const comments = parsed.comments
     .filter((comment) => changedFileSet.size === 0 || changedFileSet.has(String(comment.file ?? '')))
-    .slice(0, config.MAX_REVIEW_COMMENTS)
+    .slice(0, commentLimit)
     .map((comment) => ({
       file: String(comment.file ?? 'unknown'),
       line: typeof comment.line === 'number' ? comment.line : null,

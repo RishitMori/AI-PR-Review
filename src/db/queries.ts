@@ -7,6 +7,8 @@ const defaultRepositorySettings = {
   reviewOnSynchronize: true,
   reviewOnReopened: true,
   maxComments: 6,
+  maxInlineComments: 2,
+  maxInlineCommentsPerFile: 1,
   reviewTone: 'balanced',
   ignoredPatterns: ''
 };
@@ -163,6 +165,8 @@ export async function updateRepositorySettings(
     reviewOnSynchronize: boolean;
     reviewOnReopened: boolean;
     maxComments: number;
+    maxInlineComments: number;
+    maxInlineCommentsPerFile: number;
     reviewTone: 'light' | 'balanced' | 'strict';
     ignoredPatterns: string;
   }
@@ -419,6 +423,8 @@ function toRepositorySettingsDto(settings: any) {
     review_on_synchronize: resolved.reviewOnSynchronize,
     review_on_reopened: resolved.reviewOnReopened,
     max_comments: resolved.maxComments,
+    max_inline_comments: resolved.maxInlineComments,
+    max_inline_comments_per_file: resolved.maxInlineCommentsPerFile,
     review_tone: resolved.reviewTone,
     ignored_patterns: resolved.ignoredPatterns
   };

@@ -80,6 +80,8 @@ webhookRouter.post('/webhook', async (req, res, next) => {
 
     jobData.reviewTone = settings.reviewTone as 'light' | 'balanced' | 'strict';
     jobData.maxReviewComments = settings.maxComments;
+    jobData.maxInlineReviewComments = settings.maxInlineComments;
+    jobData.maxInlineCommentsPerFile = settings.maxInlineCommentsPerFile;
     jobData.ignoredPatterns = settings.ignoredPatterns
       .split('\n')
       .map((pattern) => pattern.trim())

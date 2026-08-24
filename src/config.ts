@@ -26,6 +26,8 @@ const baseEnvSchema = z.object({
   OPENROUTER_APP_NAME: z.string().default('AI PR Review Bot'),
   MAX_DIFF_CHARS: z.coerce.number().int().positive().default(25000),
   MAX_REVIEW_COMMENTS: z.coerce.number().int().positive().default(6),
+  MAX_INLINE_REVIEW_COMMENTS: z.coerce.number().int().min(1).max(3).default(3),
+  MAX_INLINE_COMMENTS_PER_FILE: z.coerce.number().int().min(1).max(2).default(2),
   LLM_DAILY_LIMIT: z.coerce.number().int().positive().default(40),
   LLM_MINUTE_LIMIT: z.coerce.number().int().positive().default(5),
   JWT_SECRET: z.string().default(''),

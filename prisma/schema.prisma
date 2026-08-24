@@ -63,6 +63,8 @@ model RepositorySettings {
   reviewOnSynchronize Boolean   @default(true) @map("review_on_synchronize")
   reviewOnReopened    Boolean   @default(true) @map("review_on_reopened")
   maxComments         Int       @default(6) @map("max_comments")
+  maxInlineComments   Int       @default(2) @map("max_inline_comments")
+  maxInlineCommentsPerFile Int   @default(1) @map("max_inline_comments_per_file")
   reviewTone          String    @default("balanced") @map("review_tone") @db.VarChar(50)
   ignoredPatterns     String    @default("") @map("ignored_patterns")
   createdAt           DateTime? @default(now()) @map("created_at") @db.Timestamp(6)

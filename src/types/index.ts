@@ -27,6 +27,8 @@ export interface ReviewJobData {
   headSha: string;
   reviewTone?: 'light' | 'balanced' | 'strict';
   maxReviewComments?: number;
+  maxInlineReviewComments?: number;
+  maxInlineCommentsPerFile?: number;
   ignoredPatterns?: string[];
 }
 

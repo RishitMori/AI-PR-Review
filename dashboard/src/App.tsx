@@ -109,6 +109,8 @@ interface RepositorySettings {
   review_on_synchronize: boolean;
   review_on_reopened: boolean;
   max_comments: number;
+  max_inline_comments: number;
+  max_inline_comments_per_file: number;
   review_tone: 'light' | 'balanced' | 'strict';
   ignored_patterns: string;
 }
@@ -1837,6 +1839,28 @@ function RepositorySettingsEditor(props: { repo: Repository; onSaveSettings: (re
           type="number"
           value={settings.max_comments}
           onChange={(event) => update({ ...settings, max_comments: clampNumber(Number(event.target.value), 1, 20) })}
+        />
+      </Stack>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+        <TextField
+          fullWidth
+          helperText="Hard limit: 3. Use 0 to keep all findings in the walkthrough."
+          inputProps={{ min: 0, max: 3 }}
+          label="Max inline comments"
+          size="small"
+          type="number"
+          value={settings.max_inline_comments}
+          onChange={(event) => update({ ...settings, max_inline_comments: clampNumber(Number(event.target.value), 0, 3) })}
+        />
+        <TextField
+          fullWidth
+          helperText="Hard limit: 2 per file."
+          inputProps={{ min: 1, max: 2 }}
+          label="Inline comments per file"
+          size="small"
+          type="number"
+          value={settings.max_inline_comments_per_file}
+          onChange={(event) => update({ ...settings, max_inline_comments_per_file: clampNumber(Number(event.target.value), 1, 2) })}
         />
       </Stack>
       <Grid container spacing={1}>

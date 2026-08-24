@@ -14,6 +14,8 @@ const repositorySettingsSchema = z.object({
   review_on_synchronize: z.boolean(),
   review_on_reopened: z.boolean(),
   max_comments: z.coerce.number().int().min(1).max(20),
+  max_inline_comments: z.coerce.number().int().min(0).max(config.MAX_INLINE_REVIEW_COMMENTS),
+  max_inline_comments_per_file: z.coerce.number().int().min(1).max(config.MAX_INLINE_COMMENTS_PER_FILE),
   review_tone: z.enum(['light', 'balanced', 'strict']),
   ignored_patterns: z.string().max(2000).default('')
 });
@@ -55,6 +57,8 @@ reviewsRouter.patch('/api/repos/:id/settings', async (req, res, next) => {
       reviewOnSynchronize: parsed.data.review_on_synchronize,
       reviewOnReopened: parsed.data.review_on_reopened,
       maxComments: parsed.data.max_comments,
+      maxInlineComments: parsed.data.max_inline_comments,
+      maxInlineCommentsPerFile: parsed.data.max_inline_comments_per_file,
       reviewTone: parsed.data.review_tone,
       ignoredPatterns: normalizeIgnoredPatterns(parsed.data.ignored_patterns)
     });
@@ -68,6 +72,8 @@ reviewsRouter.patch('/api/repos/:id/settings', async (req, res, next) => {
         review_on_synchronize: settings.reviewOnSynchronize,
         review_on_reopened: settings.reviewOnReopened,
         max_comments: settings.maxComments,
+        max_inline_comments: settings.maxInlineComments,
+        max_inline_comments_per_file: settings.maxInlineCommentsPerFile,
         review_tone: settings.reviewTone,
         ignored_patterns: settings.ignoredPatterns
       }
