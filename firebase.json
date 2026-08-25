@@ -1,0 +1,13 @@
+{
+  "hosting": {
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "ai-pr-review-api",
+          "region": "asia-south1"
+        }
+      }
+    ]
+  }
+}
