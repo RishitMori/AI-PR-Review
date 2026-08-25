@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { linkUserInstallation, replaceUserInstallations, upsertGitHubInstallation, upsertRepository } from '../db/queries.js';
 import { prisma } from '../db/prisma.js';
@@ -6,6 +7,8 @@ import { redisConnection } from '../queue/redis.js';
 import { listUserInstallationRepositories, listUserInstallations } from './github.service.js';
 import type { AuthUser } from '../types/index.js';
 import { logger } from '../utils/logger.js';
+
+export const authSessionCookieName = '__session';
 
 interface GitHubTokenResponse {
   access_token?: string;
@@ -24,6 +27,35 @@ interface GitHubEmailResponse {
   email: string;
   primary: boolean;
   verified: boolean;
+}
+
+interface GitHubOAuthState {
+  purpose: 'github_oauth';
+  nonce: string;
+  returnTo: string;
+}
+
+export function createGitHubOAuthState(returnTo: string) {
+  return jwt.sign(
+    {
+      purpose: 'github_oauth',
+      nonce: crypto.randomBytes(24).toString('hex'),
+      returnTo
+    } satisfies GitHubOAuthState,
+    config.JWT_SECRET,
+    { expiresIn: '10m' }
+  );
+}
+
+export function verifyGitHubOAuthState(state: string) {
+  const payload = jwt.verify(state, config.JWT_SECRET) as Partial<GitHubOAuthState>;
+  if (payload.purpose !== 'github_oauth' || typeof payload.returnTo !== 'string') {
+    throw new Error('Invalid GitHub OAuth state.');
+  }
+
+  return {
+    returnTo: payload.returnTo
+  };
 }
 
 export function getGitHubAuthUrl(state: string) {

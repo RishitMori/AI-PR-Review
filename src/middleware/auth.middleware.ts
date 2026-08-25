@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
-import { refreshSession, verifyAuthToken } from '../services/auth.service.js';
+import { authSessionCookieName, refreshSession, verifyAuthToken } from '../services/auth.service.js';
 
 export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  const token = req.cookies?.token;
+  const token = req.cookies?.[authSessionCookieName] ?? req.cookies?.token;
 
   if (!token) {
     return res.status(401).json({ error: 'Unauthorized' });
