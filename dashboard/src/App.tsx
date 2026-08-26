@@ -41,6 +41,8 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ManageSearchIcon from '@mui/icons-material/ManageSearch';
+import MenuOpenIcon from '@mui/icons-material/MenuOpen';
+import MenuIcon from '@mui/icons-material/Menu';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import PolicyIcon from '@mui/icons-material/Policy';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -97,6 +99,9 @@ interface ReviewDetail extends ReviewListItem {
 interface Repository {
   id: number;
   full_name: string;
+  selected: boolean;
+  plan_active: boolean;
+  selection_locked: boolean;
   pull_request_count: number;
   review_count: number;
   failed_count: number;
@@ -125,9 +130,37 @@ interface SetupInfo {
 
 interface BillingInfo {
   plan_name: string;
+  current_plan_id: BillingPlan['id'];
+  repo_limit: number | null;
+  billing_status: 'free' | 'payment_pending' | 'active' | string;
   status: 'ready' | 'setup_required';
-  payment_link_url: string | null;
+  checkout_ready: boolean;
+  key_id: string | null;
+  currency: string;
+  plans: BillingPlan[];
   customer_portal_url: string | null;
+  latest_payment_id: string | null;
+  paid_at: string | null;
+}
+
+interface BillingPlan {
+  id: 'free' | 'basic' | 'pro' | 'scale';
+  name: string;
+  amount: number;
+  repoLimit: number | null;
+  benefits: string[];
+}
+
+interface RazorpayCheckoutResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+  }
 }
 
 type ColorMode = 'light' | 'dark';
@@ -334,7 +367,7 @@ function authHref(returnTo = '/dashboard') {
   return `/auth/github?return_to=${encodeURIComponent(returnTo)}`;
 }
 
-const landingLogos = ['GitHub', 'GitLab', 'Bitbucket', 'Linear', 'Vercel'];
+const landingLogos = ['GitHub App', 'Redis Queue', 'PostgreSQL', 'Prisma', 'OpenRouter'];
 
 const landingFeatures = [
   {
@@ -368,24 +401,24 @@ const landingFeatures = [
 ];
 
 const landingStats = [
-  { value: '540k+', numericTarget: null, label: 'PRs reviewed' },
-  { value: '40%', numericTarget: null, label: 'Cycle time reduction' },
-  { value: '99.99%', numericTarget: null, label: 'System uptime SLA' },
-  { value: '0 days', numericTarget: null, label: 'Code retention period' }
+  { value: '1 repo', numericTarget: null, label: 'Free plan included' },
+  { value: '2 repos', numericTarget: null, label: 'Basic plan access' },
+  { value: '5 repos', numericTarget: null, label: 'Pro plan access' },
+  { value: 'Early', numericTarget: null, label: 'Product stage' }
 ];
 
 const customerTestimonials = [
   {
-    quote: "ReviewPilot reduced our PR cycle times by 40%. The AI findings are surprisingly precise, catching edge cases before they touch our staging env.",
-    author: "Marcus Chen",
-    role: "VP of Engineering",
-    company: "Vercel"
+    quote: "ReviewPilot is built for small teams that want a second pass on every pull request without adding another manual review step.",
+    author: "Early access",
+    role: "For founders and engineering teams",
+    company: "ReviewPilot"
   },
   {
-    quote: "Security was our primary blocker for adopting AI reviews. ReviewPilot's stateless architecture and SOC 2 compliance made approval from our infosec team seamless.",
-    author: "Sarah Jenkins",
-    role: "Chief Security Officer",
-    company: "Linear"
+    quote: "The product is new, so the promise is simple: clear GitHub setup, transparent repo limits, and useful review summaries you can verify in your own workflow.",
+    author: "Startup note",
+    role: "No fake logos or paid claims",
+    company: "ReviewPilot"
   }
 ];
 
@@ -397,26 +430,26 @@ const changelogEntries = [
 
 const landingPricing = [
   {
-    name: 'Starter',
-    price: '$0',
-    text: 'For one repo and fast proof-of-value.',
-    features: ['GitHub App install', 'Webhook reviews', 'Basic dashboard'],
+    name: 'Free',
+    price: '₹0',
+    text: 'For one repository and fast proof-of-value.',
+    features: ['1 repository', 'GitHub App install', 'Basic dashboard'],
     sso: false
   },
   {
-    name: 'Pro',
-    price: '$29',
+    name: 'Basic',
+    price: '₹1000',
     text: 'For teams shipping code every day.',
-    features: ['Multi-repo review policies', 'Worker queue visibility', 'Priority support'],
+    features: ['2 repositories', 'Webhook reviews', 'Review settings'],
     featured: true,
     sso: false
   },
   {
-    name: 'Scale',
-    price: 'Custom',
-    text: 'For larger orgs and tighter workflows.',
-    features: ['Advanced routing', 'Custom limits', 'SLA and onboarding'],
-    sso: true
+    name: 'Pro',
+    price: '₹2000',
+    text: 'For larger teams and tighter workflows.',
+    features: ['5 repositories', 'Inline review comments', 'Priority queue'],
+    sso: false
   }
 ];
 
@@ -525,10 +558,17 @@ function App() {
   const isSwitchGitHub = path === '/switch-github';
 
   useEffect(() => {
-    const onPopState = () => setPath(normalizePath(window.location.pathname));
+    const onPopState = () => {
+      setPath(normalizePath(window.location.pathname));
+      scrollToHashSection(window.location.hash);
+    };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  useEffect(() => {
+    scrollToHashSection(window.location.hash);
+  }, [path]);
 
   useEffect(() => {
     localStorage.setItem('reviewpilot-color-mode', colorMode);
@@ -537,7 +577,8 @@ function App() {
 
   function navigate(nextPath: string) {
     window.history.pushState({}, '', nextPath);
-    setPath(nextPath);
+    setPath(normalizePath(window.location.pathname));
+    scrollToHashSection(window.location.hash);
   }
 
   const activeTheme = useMemo(() => buildTheme(colorMode, isDashboard ? 'dashboard' : 'landing'), [colorMode, isDashboard]);
@@ -796,7 +837,7 @@ ReviewPilot comment:
         <RevealSection>
           <Box className="logo-strip">
             <Typography color="text.secondary" fontSize={13} sx={{ textTransform: 'uppercase', letterSpacing: 1.8 }}>
-              Trusted by teams using
+              Built with
             </Typography>
             <Stack direction="row" flexWrap="wrap" useFlexGap spacing={1.25} sx={{ justifyContent: 'center' }}>
               {landingLogos.map((logo) => (
@@ -817,11 +858,11 @@ ReviewPilot comment:
                     <Stack direction="row" spacing={1.5} alignItems="center">
                       <SecurityIcon color="primary" />
                       <Typography variant="h4" fontWeight={800} sx={{ fontSize: '24px', letterSpacing: '-0.01em' }}>
-                        Enterprise-Grade Security & Compliance
+                        Security-minded by design
                       </Typography>
                     </Stack>
                     <Typography color="text.secondary" sx={{ fontSize: '15px', lineHeight: 1.7 }}>
-                      ReviewPilot is designed from the ground up for strict corporate policy guidelines. All PR review requests are processed statelessly: code analysis happens purely in temporary memory, memory buffers are cleared immediately after the review, and your codebase is never stored or used to train public models.
+                      ReviewPilot is early, so the security promise is intentionally practical: use GitHub App permissions, process pull request diffs only when reviews run, and keep repository access visible inside the dashboard.
                     </Typography>
                     <Stack direction="row" spacing={2.5} sx={{ mt: 1 }} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Button onClick={() => props.onNavigate('/privacy')} startIcon={<VerifiedUserIcon />} variant="outlined" size="small">
@@ -830,7 +871,7 @@ ReviewPilot comment:
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#10b981', display: 'inline-block' }} />
                         <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                          All systems operational
+                          Early access, actively monitored
                         </Typography>
                       </Stack>
                     </Stack>
@@ -839,9 +880,9 @@ ReviewPilot comment:
                 <Grid item xs={12} lg={6}>
                   <Grid container spacing={2}>
                     {[
-                      { title: 'SOC 2 Type II', desc: 'Verified security framework' },
-                      { title: 'GDPR Compliant', desc: 'Strict data privacy controls' },
-                      { title: 'ISO 27001', desc: 'Standard security practices' }
+                      { title: 'GitHub App access', desc: 'Only installed repositories are visible' },
+                      { title: 'Plan-based activation', desc: 'Reviews run only on selected repos' },
+                      { title: 'Clear controls', desc: 'Pause reviews per repository' }
                     ].map((badge) => (
                       <Grid item xs={12} sm={4} key={badge.title}>
                         <Card variant="outlined" sx={{ textAlign: 'center', p: 3, height: '100%', bgcolor: isDark ? 'rgba(15, 23, 42, 0.4)' : '#f8fafc', borderColor: isDark ? 'rgba(148, 163, 184, 0.08)' : '#e2e8f0' }}>
@@ -944,10 +985,10 @@ ReviewPilot comment:
         </RevealSection>
       </Container>
 
-      <Container maxWidth="xl" sx={{ py: { xs: 6, md: 8 } }}>
+      <Container id="updates" maxWidth="xl" sx={{ py: { xs: 6, md: 8 } }}>
         <RevealSection>
           <Stack spacing={4}>
-            <SectionHeading eyebrow="Social proof" title="Trusted by teams shipping mission-critical code." text="ReviewPilot helps engineering leaders reduce cycle times and maintain compliance." />
+            <SectionHeading eyebrow="Early product" title="Built for teams trying AI review for the first time." text="ReviewPilot is a new startup product focused on clear setup, honest limits, and practical pull request summaries." />
             <Grid container spacing={4} alignItems="stretch">
               <Grid item xs={12} md={6}>
                 <Grid container spacing={2} sx={{ height: '100%' }}>
@@ -984,7 +1025,7 @@ ReviewPilot comment:
                               {testimonial.author}
                             </Typography>
                             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: '12px' }}>
-                              {testimonial.role} at <strong>{testimonial.company}</strong>
+                              {testimonial.role} · <strong>{testimonial.company}</strong>
                             </Typography>
                           </Box>
                         </Stack>
@@ -1099,8 +1140,28 @@ function TermsPage(props: { onNavigate: (path: string) => void; colorMode: Color
         text="You agree to keep your GitHub account secure and to only connect repositories you are authorized to manage."
       />
       <LegalSection
-        title="Billing"
-        text="If paid plans are added, pricing, limits, refunds, and renewal terms should be published before users are charged."
+        title="Payments and refunds"
+        text="Paid plans are charged in advance through the available payment provider. Unless required by applicable law or expressly stated in writing, payments are final and non-refundable once a plan is activated or payment is completed."
+      />
+      <LegalSection
+        title="Plan limits"
+        text="Repository limits, feature access, usage limits, and pricing may vary by plan. You are responsible for selecting the correct plan before payment and for managing which repositories are active under your plan."
+      />
+      <LegalSection
+        title="Acceptable use"
+        text="You may not use the service to access repositories without permission, submit unlawful content, interfere with the platform, reverse engineer the service, or use review output in a way that violates another party's rights."
+      />
+      <LegalSection
+        title="No warranty"
+        text="The service is provided on an as-is and as-available basis. We do not guarantee uninterrupted availability, error-free AI output, complete security, or that every defect or vulnerability will be detected."
+      />
+      <LegalSection
+        title="Limitation of liability"
+        text="To the maximum extent permitted by law, ReviewPilot and its operators are not liable for indirect, incidental, special, consequential, or punitive damages, including lost profits, lost data, business interruption, security incidents, or decisions made based on AI-generated review output."
+      />
+      <LegalSection
+        title="Complaints and disputes"
+        text={`If you have a complaint or legal concern, contact ${siteConfig.supportEmail} first so we can review it in good faith. These terms do not limit rights that cannot be waived under applicable law.`}
       />
       <LegalSection
         title="Contact"
@@ -1115,11 +1176,19 @@ function PrivacyPage(props: { onNavigate: (path: string) => void; colorMode: Col
     <LegalShell title="Privacy Policy" icon={<PolicyIcon />} onNavigate={props.onNavigate} colorMode={props.colorMode} onToggleColorMode={props.onToggleColorMode}>
       <LegalSection
         title="Information collected"
-        text="The app may store GitHub profile details, repository names, pull request metadata, review summaries, model details, and operational logs needed to run the service."
+        text="We aim to collect only the information needed to operate the service. This may include GitHub profile details, repository names, selected repository access, pull request metadata, review summaries, model details, payment status, and operational logs."
       />
       <LegalSection
         title="How data is used"
-        text="Data is used to authenticate users, process pull request reviews, show dashboard history, troubleshoot failed jobs, and improve product reliability."
+        text="Data is used to authenticate users, process pull request reviews, enforce plan limits, show dashboard history, troubleshoot failed jobs, prevent abuse, process billing status, and improve product reliability."
+      />
+      <LegalSection
+        title="Code and repository content"
+        text="The service accesses pull request diffs and repository information only as needed to provide reviews for repositories you connect through GitHub App permissions. Do not connect repositories unless you have authority to do so."
+      />
+      <LegalSection
+        title="No sale of personal information"
+        text="We do not sell personal information. We do not intentionally collect sensitive personal information beyond what is necessary to authenticate accounts, provide reviews, manage billing, and operate the product."
       />
       <LegalSection
         title="Secrets"
@@ -1362,12 +1431,12 @@ function Footer(props: { onNavigate: (path: string) => void; colorMode: ColorMod
                   color: isDark ? '#cbd5e1' : 'text.secondary'
                 }}
               >
-                Stateless, enterprise-grade AI pull request reviews for modern engineering organizations.
+                Early-stage AI pull request reviews for small teams that want faster, clearer feedback in GitHub.
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
                 <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#10b981' }} />
                 <Typography variant="caption" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', fontWeight: 600 }}>
-                  All systems operational (99.99% uptime)
+                  Early access product, improving with real usage
                 </Typography>
               </Stack>
             </Stack>
@@ -1377,8 +1446,8 @@ function Footer(props: { onNavigate: (path: string) => void; colorMode: ColorMod
               Product
             </Typography>
             <Stack spacing={1} alignItems="flex-start">
-              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}>Features</Button>
-              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}>Pricing</Button>
+              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/#features')}>Features</Button>
+              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/#pricing')}>Pricing</Button>
               <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/privacy')}>Security</Button>
               <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/dashboard')}>Dashboard</Button>
             </Stack>
@@ -1388,9 +1457,9 @@ function Footer(props: { onNavigate: (path: string) => void; colorMode: ColorMod
               Resources
             </Typography>
             <Stack spacing={1} alignItems="flex-start">
-              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => document.getElementById('workflow')?.scrollIntoView({ behavior: 'smooth' })}>Workflow</Button>
-              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} href="https://github.com" target="_blank" rel="noreferrer">Documentation</Button>
-              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} href={siteConfig.linkedinUrl} target="_blank" rel="noreferrer">Updates</Button>
+              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/#workflow')}>Workflow</Button>
+              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/#workflow')}>Documentation</Button>
+              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/#updates')}>Updates</Button>
             </Stack>
           </Grid>
           <Grid item xs={6} sm={3} md={2}>
@@ -1410,7 +1479,7 @@ function Footer(props: { onNavigate: (path: string) => void; colorMode: ColorMod
             <Stack spacing={1} alignItems="flex-start">
               <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/privacy')}>Privacy Policy</Button>
               <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/terms')}>Terms of Service</Button>
-              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/privacy')}>GDPR / Trust</Button>
+              <Button size="small" variant="text" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary', p: 0, minWidth: 0, '&:hover': { color: 'primary.main' } }} onClick={() => props.onNavigate('/privacy')}>Privacy & Data</Button>
             </Stack>
           </Grid>
         </Grid>
@@ -1419,7 +1488,7 @@ function Footer(props: { onNavigate: (path: string) => void; colorMode: ColorMod
             &copy; {new Date().getFullYear()} {siteConfig.productName}. All rights reserved.
           </Typography>
           <Typography variant="caption" sx={{ color: isDark ? '#cbd5e1' : 'text.secondary' }}>
-            Stateless reviews are ISO 27001 and SOC 2 Type II aligned.
+            Repository access is controlled through GitHub App permissions.
           </Typography>
         </Box>
       </Container>
@@ -1582,7 +1651,8 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarExpanded, setSidebarExpanded] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => window.localStorage.getItem('reviewpilot-sidebar-collapsed') !== 'true');
+  const billingActive = Boolean(billing?.current_plan_id);
 
   useEffect(() => {
     loadSession();
@@ -1592,9 +1662,22 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
     setSection(sectionFromPath(props.path));
   }, [props.path]);
 
+  function toggleSidebar() {
+    setSidebarExpanded((current) => {
+      const next = !current;
+      window.localStorage.setItem('reviewpilot-sidebar-collapsed', String(!next));
+      return next;
+    });
+  }
+
+  function isPaymentLockedSection(nextSection: DashboardSection) {
+    return !billingActive && nextSection !== 'billing' && nextSection !== 'security';
+  }
+
   function openSection(nextSection: DashboardSection) {
-    setSection(nextSection);
-    props.onNavigate(pathFromSection(nextSection));
+    const targetSection = isPaymentLockedSection(nextSection) ? 'billing' : nextSection;
+    setSection(targetSection);
+    props.onNavigate(pathFromSection(targetSection));
   }
 
   async function loadSession() {
@@ -1614,21 +1697,23 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
     setError(null);
     try {
       const requestedSection = sectionFromPath(props.path);
-      const [statsResult, reviewsResult, reposResult, setupResult, billingResult] = await Promise.all([
+      const billingResult = await fetchJson<{ billing: BillingInfo }>('/api/billing');
+      setBilling(billingResult.billing);
+
+      const [statsResult, reviewsResult, reposResult, setupResult] = await Promise.all([
         fetchJson<{ stats: Stats }>('/api/stats'),
         fetchJson<{ reviews: ReviewListItem[] }>('/api/reviews?limit=30'),
         fetchJson<{ repositories: Repository[] }>('/api/repos'),
-        fetchJson<{ setup: SetupInfo }>('/api/setup'),
-        fetchJson<{ billing: BillingInfo }>('/api/billing')
+        fetchJson<{ setup: SetupInfo }>('/api/setup')
       ]);
 
       setStats(statsResult.stats);
       setReviews(reviewsResult.reviews);
       setRepos(reposResult.repositories);
       setSetup(setupResult.setup);
-      setBilling(billingResult.billing);
       if (reposResult.repositories.length === 0 && requestedSection === 'overview') {
-        openSection('setup');
+        setSection('setup');
+        props.onNavigate('/dashboard/setup');
       }
 
       if (!selectedReview && reviewsResult.reviews[0]) {
@@ -1677,6 +1762,37 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
       setRepos((currentRepos) => currentRepos.map((repo) => (repo.id === repoId ? { ...repo, settings: result.settings } : repo)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save repository settings.');
+    }
+  }
+
+  async function saveRepoSelection(repoId: number, selected: boolean) {
+    setError(null);
+    try {
+      const result = await fetchJson<{ selection: { selected: boolean; plan_active: boolean } }>(`/api/repos/${repoId}/selection`, {
+        method: 'PATCH',
+        body: { selected }
+      });
+      setRepos((currentRepos) => currentRepos.map((repo) => (
+        repo.id === repoId
+          ? { ...repo, selected: result.selection.selected, plan_active: result.selection.plan_active }
+          : repo
+      )));
+      await loadDashboardData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save repository selection.');
+    }
+  }
+
+  async function syncGitHubAccess() {
+    setError(null);
+    try {
+      const result = await fetchJson<{ repositories: Repository[] }>('/api/github/sync', {
+        method: 'POST'
+      });
+      setRepos(result.repositories);
+      await loadDashboardData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not sync GitHub repository access.');
     }
   }
 
@@ -1767,17 +1883,14 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
       <Box
-        onMouseEnter={() => setSidebarExpanded(true)}
-        onMouseLeave={() => setSidebarExpanded(false)}
         sx={{
-          width: { xs: 0, md: sidebarExpanded ? 260 : 72 },
+          width: { xs: 0, md: sidebarExpanded ? 268 : 84 },
           display: { xs: 'none', md: 'flex' },
           flexDirection: 'column',
           borderRight: '1px solid',
           borderColor: 'divider',
           bgcolor: 'background.paper',
-          transition: 'width 280ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1)',
-          boxShadow: sidebarExpanded ? '12px 0 32px rgba(15, 23, 42, 0.08)' : 'none',
+          transition: 'width 220ms ease',
           overflowX: 'hidden',
           zIndex: 10,
           position: 'sticky',
@@ -1787,39 +1900,40 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
           px: 1.5
         }}
       >
-        <Box 
-          onClick={props.onHome}
-          sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 1.5, 
-            px: 1, 
-            mb: 4, 
-            height: 40, 
-            overflow: 'hidden', 
-            whiteSpace: 'nowrap',
-            cursor: 'pointer',
-            '&:hover': {
-              opacity: 0.85
-            }
-          }}
-        >
-          <BrandLogo />
-          <Typography
-            variant="h6"
-            fontWeight={850}
-            color="text.primary"
+        <Stack direction="row" alignItems="center" justifyContent={sidebarExpanded ? 'space-between' : 'center'} sx={{ mb: 4, minHeight: 40 }}>
+          <Box
+            onClick={props.onHome}
             sx={{
-              opacity: sidebarExpanded ? 1 : 0,
-              transform: sidebarExpanded ? 'translateX(0)' : 'translateX(-10px)',
-              maxWidth: sidebarExpanded ? 180 : 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+              minWidth: 0,
               overflow: 'hidden',
-              transition: 'opacity 220ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1), max-width 280ms cubic-bezier(0.22, 1, 0.36, 1)'
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+              '&:hover': {
+                opacity: 0.85
+              }
             }}
           >
-            ReviewPilot
-          </Typography>
-        </Box>
+            <BrandLogo />
+            {sidebarExpanded ? (
+              <Typography variant="h6" fontWeight={850} color="text.primary" noWrap>
+                ReviewPilot
+              </Typography>
+            ) : null}
+          </Box>
+          {sidebarExpanded ? (
+            <IconButton onClick={toggleSidebar} aria-label="Collapse sidebar" size="small">
+              <MenuOpenIcon fontSize="small" />
+            </IconButton>
+          ) : null}
+        </Stack>
+        {!sidebarExpanded ? (
+          <IconButton onClick={toggleSidebar} aria-label="Expand sidebar" size="small" sx={{ alignSelf: 'center', mb: 2 }}>
+            <MenuIcon fontSize="small" />
+          </IconButton>
+        ) : null}
         
         <Stack spacing={1} sx={{ flex: 1 }}>
           {[
@@ -1831,65 +1945,72 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
             { value: 'security', label: 'Security & SSO', icon: <VerifiedUserIcon /> }
           ].map((item) => {
             const active = section === item.value;
+            const locked = isPaymentLockedSection(item.value as DashboardSection);
             return (
               <Button
                 key={item.value}
+                disabled={locked}
                 onClick={() => openSection(item.value as DashboardSection)}
                 variant={active ? 'contained' : 'text'}
                 color={active ? 'primary' : 'inherit'}
                 sx={{
+                  alignSelf: sidebarExpanded ? 'stretch' : 'center',
                   justifyContent: sidebarExpanded ? 'flex-start' : 'center',
-                  minWidth: 0,
+                  minWidth: 44,
+                  width: sidebarExpanded ? '100%' : 44,
                   height: 44,
                   px: sidebarExpanded ? 2 : 0,
                   py: 1,
-                  borderRadius: 2,
+                  borderRadius: 1.5,
                   whiteSpace: 'nowrap',
-                  color: active ? '#ffffff' : 'text.secondary',
-                  transition: 'padding 280ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, color 180ms ease, transform 180ms ease',
-                  '& .sidebar-label': {
-                    opacity: sidebarExpanded ? 1 : 0,
-                    transform: sidebarExpanded ? 'translateX(0)' : 'translateX(-8px)',
-                    maxWidth: sidebarExpanded ? 160 : 0,
-                    overflow: 'hidden',
-                    transition: 'opacity 180ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1), max-width 280ms cubic-bezier(0.22, 1, 0.36, 1)'
+                  color: locked ? 'text.disabled' : active ? '#ffffff' : 'text.secondary',
+                  transition: 'background-color 160ms ease, color 160ms ease',
+                  '& > svg': {
+                    flexShrink: 0,
+                    fontSize: 24
                   },
                   '&:hover': {
-                    transform: 'translateX(2px)',
                     bgcolor: active ? 'primary.main' : 'action.hover'
                   },
+                  '&.Mui-disabled': {
+                    opacity: 0.42,
+                    color: 'text.disabled'
+                  }
                 }}
-                title={item.label}
+                title={locked ? 'Payment required' : item.label}
               >
                 {item.icon}
-                <Typography className="sidebar-label" variant="body2" sx={{ ml: 2, fontWeight: active ? 700 : 500 }}>
-                  {item.label}
-                </Typography>
+                {sidebarExpanded ? (
+                  <Typography variant="body2" sx={{ ml: 2, fontWeight: active ? 700 : 500 }}>
+                    {item.label}
+                  </Typography>
+                ) : null}
               </Button>
             );
           })}
         </Stack>
 
         <Box sx={{ borderTop: '1px solid', borderColor: 'divider', pt: 2, mt: 'auto', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ px: 1 }}>
+          <Stack direction="row" spacing={1.5} alignItems="center" justifyContent={sidebarExpanded ? 'flex-start' : 'center'} sx={{ px: sidebarExpanded ? 1 : 0 }}>
             <Avatar src={user.avatarUrl ?? undefined} sx={{ width: 36, height: 36 }}>{user.username[0]?.toUpperCase()}</Avatar>
-            <Box
-              sx={{
-                minWidth: 0,
-                opacity: sidebarExpanded ? 1 : 0,
-                transform: sidebarExpanded ? 'translateX(0)' : 'translateX(-10px)',
-                maxWidth: sidebarExpanded ? 160 : 0,
-                overflow: 'hidden',
-                transition: 'opacity 180ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1), max-width 280ms cubic-bezier(0.22, 1, 0.36, 1)'
-              }}
-            >
-              <Typography variant="body2" fontWeight={700} color="text.primary" sx={{ textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                {user.username}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                {user.role}
-              </Typography>
-            </Box>
+            {sidebarExpanded ? (
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="body2" fontWeight={700} color="text.primary" sx={{ textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                  {user.username}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  {user.role}
+                </Typography>
+                <Chip
+                  size="small"
+                  color={billing?.current_plan_id === 'free' ? 'default' : 'success'}
+                  label={`${billing?.plan_name ?? 'Free'} plan`}
+                  onClick={() => openSection('billing')}
+                  variant={billing?.current_plan_id === 'free' ? 'outlined' : 'filled'}
+                  sx={{ mt: 0.75, maxWidth: '100%', fontWeight: 800 }}
+                />
+              </Box>
+            ) : null}
           </Stack>
         </Box>
       </Box>
@@ -1906,6 +2027,18 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
             </Typography>
 
             <Stack direction="row" spacing={1.5} alignItems="center">
+              <Chip
+                color={billing?.current_plan_id === 'free' ? 'default' : 'success'}
+                label={`${billing?.plan_name ?? 'Free'} plan`}
+                onClick={() => openSection('billing')}
+                variant={billing?.current_plan_id === 'free' ? 'outlined' : 'filled'}
+                sx={{
+                  display: { xs: 'none', sm: 'inline-flex' },
+                  height: 36,
+                  fontWeight: 800,
+                  cursor: 'pointer'
+                }}
+              />
               <IconButton 
                 onClick={props.onToggleColorMode} 
                 aria-label="toggle theme" 
@@ -1942,16 +2075,19 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
               scrollButtons="auto"
               allowScrollButtonsMobile
             >
-              <Tab icon={<InsightsIcon />} label="Overview" value="overview" />
-              <Tab icon={<ManageSearchIcon />} label="PR Inbox" value="inbox" />
-              <Tab icon={<GitHubIcon />} label="Repos" value="repos" />
-              <Tab icon={<SettingsIcon />} label="Setup" value="setup" />
+              <Tab disabled={!billingActive} icon={<InsightsIcon />} label="Overview" value="overview" />
+              <Tab disabled={!billingActive} icon={<ManageSearchIcon />} label="PR Inbox" value="inbox" />
+              <Tab disabled={!billingActive} icon={<GitHubIcon />} label="Repos" value="repos" />
+              <Tab disabled={!billingActive} icon={<SettingsIcon />} label="Setup" value="setup" />
               <Tab icon={<CreditCardIcon />} label="Billing" value="billing" />
               <Tab icon={<VerifiedUserIcon />} label="Security" value="security" />
             </Tabs>
           </Box>
 
-          {section === 'overview' ? (
+          {!billingActive && section !== 'billing' && section !== 'security' ? (
+            <PaymentRequiredPanel onOpenBilling={() => openSection('billing')} />
+          ) : null}
+          {billingActive && section === 'overview' ? (
             <OverviewPanel
               stats={stats}
               latestReview={latestReview}
@@ -1965,7 +2101,7 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
               onOpenSetup={() => openSection('setup')}
             />
           ) : null}
-          {section === 'inbox' ? (
+          {billingActive && section === 'inbox' ? (
             <InboxPanel
               repos={repos}
               filter={filter}
@@ -1978,13 +2114,36 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
               onSelectReview={selectReview}
             />
           ) : null}
-          {section === 'repos' ? <RepositoriesPanel repos={repos} onRefresh={loadDashboardData} onSaveSettings={saveRepoSettings} /> : null}
-          {section === 'setup' ? <SetupPanel repos={repos} setup={setup} stats={stats} onOpenRepos={() => openSection('repos')} /> : null}
-          {section === 'billing' ? <BillingPanel billing={billing} repos={repos} onOpenSetup={() => openSection('setup')} /> : null}
+          {billingActive && section === 'repos' ? <RepositoriesPanel billing={billing} repos={repos} setup={setup} onRefresh={loadDashboardData} onSyncAccess={syncGitHubAccess} onSaveSelection={saveRepoSelection} onSaveSettings={saveRepoSettings} /> : null}
+          {billingActive && section === 'setup' ? <SetupPanel repos={repos} setup={setup} stats={stats} onOpenRepos={() => openSection('repos')} /> : null}
+          {section === 'billing' ? <BillingPanel billing={billing} repos={repos} onOpenSetup={() => openSection('setup')} onRefresh={loadDashboardData} /> : null}
           {section === 'security' ? <SecurityPanel user={user} setup={setup} onSwitchAccount={switchGitHubAccount} /> : null}
         </Container>
       </Box>
     </Box>
+  );
+}
+
+function PaymentRequiredPanel(props: { onOpenBilling: () => void }) {
+  return (
+    <Card>
+      <CardContent>
+        <Stack spacing={2} alignItems="flex-start">
+          <Avatar sx={{ bgcolor: 'warning.main' }}>
+            <CreditCardIcon />
+          </Avatar>
+          <Box>
+            <Typography variant="h5" fontWeight={900} color="text.primary">Payment required</Typography>
+            <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+              Choose a plan in Billing to enable reviews, repositories, and setup.
+            </Typography>
+          </Box>
+          <Button onClick={props.onOpenBilling} startIcon={<CreditCardIcon />} variant="contained">
+            View plans
+          </Button>
+        </Stack>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2633,15 +2792,86 @@ function InboxPanel(props: {
   );
 }
 
-function RepositoriesPanel(props: { repos: Repository[]; onRefresh: () => void; onSaveSettings: (repoId: number, settings: RepositorySettings) => void }) {
+function RepositoriesPanel(props: {
+  billing: BillingInfo | null;
+  repos: Repository[];
+  setup: SetupInfo | null;
+  onRefresh: () => void;
+  onSyncAccess: () => void;
+  onSaveSelection: (repoId: number, selected: boolean) => void;
+  onSaveSettings: (repoId: number, settings: RepositorySettings) => void;
+}) {
+  const selectedCount = props.repos.filter((repo) => repo.plan_active).length;
+  const repoLimit = props.billing?.repo_limit ?? 1;
+  const atPlanLimit = repoLimit !== null && selectedCount >= repoLimit;
+  const [repoSearch, setRepoSearch] = useState('');
+  const [repoView, setRepoView] = useState<'active' | 'available' | 'all'>('active');
+  const normalizedSearch = repoSearch.trim().toLowerCase();
+  const sortedRepos = useMemo(() => {
+    return [...props.repos].sort((left, right) => {
+      if (left.plan_active !== right.plan_active) return left.plan_active ? -1 : 1;
+      return left.full_name.localeCompare(right.full_name);
+    });
+  }, [props.repos]);
+  const filteredRepos = useMemo(() => {
+    return sortedRepos.filter((repo) => {
+      const matchesView =
+        repoView === 'all' ||
+        (repoView === 'active' && repo.plan_active) ||
+        (repoView === 'available' && !repo.plan_active);
+      const matchesSearch = !normalizedSearch || repo.full_name.toLowerCase().includes(normalizedSearch);
+      return matchesView && matchesSearch;
+    });
+  }, [normalizedSearch, repoView, sortedRepos]);
+
   return (
     <Stack spacing={2} sx={{ mt: 3 }}>
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={2}>
         <Box>
           <Typography variant="h5" fontWeight={900} color="text.primary">Repositories</Typography>
-          <Typography color="text.secondary">Monitor where the GitHub App is active and where reviews are happening.</Typography>
+          <Typography color="text.secondary">Show every installed repository, then choose which ones count against your plan for reviews.</Typography>
         </Box>
-        <Button onClick={props.onRefresh} startIcon={<RefreshIcon />} variant="outlined">Refresh</Button>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
+          <Chip label={`${selectedCount}/${formatRepoLimit(repoLimit)} active`} color={atPlanLimit ? 'warning' : 'success'} variant={atPlanLimit ? 'outlined' : 'filled'} />
+          <Button
+            disabled={!props.setup?.github_install_url}
+            href={props.setup?.github_install_url ?? undefined}
+            rel="noreferrer"
+            startIcon={<GitHubIcon />}
+            target="_blank"
+            variant="contained"
+          >
+            Add repo access
+          </Button>
+          <Button onClick={props.onSyncAccess} startIcon={<RefreshIcon />} variant="outlined">Sync GitHub access</Button>
+        </Stack>
+      </Stack>
+      <Alert severity="info">
+        First grant repository access in GitHub, then sync it here. After an upgrade, select the extra repositories you want reviewed until you reach your plan limit.
+      </Alert>
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', md: 'center' }}>
+        <TextField
+          label="Search repositories"
+          onChange={(event) => setRepoSearch(event.target.value)}
+          size="small"
+          sx={{ maxWidth: { md: 360 } }}
+          value={repoSearch}
+        />
+        <TextField
+          label="Show"
+          onChange={(event) => setRepoView(event.target.value as 'active' | 'available' | 'all')}
+          select
+          size="small"
+          sx={{ width: { xs: '100%', md: 220 } }}
+          value={repoView}
+        >
+          <MenuItem value="active">Active plan repos</MenuItem>
+          <MenuItem value="available">Available to select</MenuItem>
+          <MenuItem value="all">All connected repos</MenuItem>
+        </TextField>
+        <Typography color="text.secondary" fontSize={13}>
+          Showing {filteredRepos.length} of {props.repos.length}
+        </Typography>
       </Stack>
       <Grid container spacing={2}>
         {props.repos.length === 0 ? (
@@ -2649,30 +2879,78 @@ function RepositoriesPanel(props: { repos: Repository[]; onRefresh: () => void; 
             <EmptyState title="No repositories yet" text="Install the GitHub App on a repository and open a pull request to populate this view." />
           </Grid>
         ) : null}
-        {props.repos.map((repo) => (
+        {props.repos.length > 0 && filteredRepos.length === 0 ? (
+          <Grid item xs={12}>
+            <EmptyState title="No matching repositories" text="Try a different search or repository view." />
+          </Grid>
+        ) : null}
+        {filteredRepos.map((repo) => (
           <Grid item xs={12} lg={6} key={repo.id}>
             <Card sx={{ height: '100%' }}>
               <CardContent>
                 <Stack direction="row" justifyContent="space-between" spacing={2}>
                   <Box>
                     <Typography fontWeight={900}>{repo.full_name}</Typography>
-                    <Typography color="text.secondary" fontSize={13}>
-                      {repo.settings.enabled ? 'Bot active' : 'Bot disabled'}
-                    </Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+                      <Chip size="small" color={repo.plan_active ? 'success' : 'default'} label={repo.plan_active ? 'Plan active' : 'Installed only'} />
+                      <Chip size="small" variant="outlined" label={repo.plan_active ? repo.settings.enabled ? 'Bot enabled' : 'Bot disabled' : 'Not reviewing'} />
+                    </Stack>
                   </Box>
-                  <Switch
-                    checked={repo.settings.enabled}
-                    onChange={(event) => props.onSaveSettings(repo.id, { ...repo.settings, enabled: event.target.checked })}
-                  />
+                  <Stack spacing={0.75} alignItems="flex-end">
+                    <Switch
+                      checked={repo.plan_active}
+                      disabled={repo.selection_locked || (!repo.plan_active && repoLimit !== null && selectedCount >= repoLimit)}
+                      onChange={(event) => props.onSaveSelection(repo.id, event.target.checked)}
+                    />
+                    <Typography color="text.secondary" fontSize={12}>Plan active</Typography>
+                  </Stack>
+                </Stack>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mt: 2 }}>
+                  <Button
+                    color={repo.plan_active ? 'secondary' : 'primary'}
+                    disabled={repo.selection_locked || (!repo.plan_active && repoLimit !== null && selectedCount >= repoLimit)}
+                    onClick={() => props.onSaveSelection(repo.id, !repo.plan_active)}
+                    size="small"
+                    variant={repo.plan_active ? 'outlined' : 'contained'}
+                  >
+                    {repo.plan_active ? 'Remove from plan' : atPlanLimit ? 'Plan limit reached' : 'Select for reviews'}
+                  </Button>
+                  {!repo.plan_active && atPlanLimit ? (
+                    <Typography color="text.secondary" fontSize={13} sx={{ alignSelf: 'center' }}>
+                      Remove another active repo or upgrade to select this one.
+                    </Typography>
+                  ) : null}
+                  {repo.selection_locked ? (
+                    <Typography color="text.secondary" fontSize={13} sx={{ alignSelf: 'center' }}>
+                      Free plan selection is locked.
+                    </Typography>
+                  ) : null}
                 </Stack>
                 <Grid container spacing={1.5} sx={{ mt: 2 }}>
                   <MiniMetric label="PRs" value={repo.pull_request_count} />
                   <MiniMetric label="Reviews" value={repo.review_count} />
                   <MiniMetric label="Failed" value={repo.failed_count} />
                 </Grid>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2 }}>
+                  <Box>
+                    <Typography fontWeight={850}>Review bot</Typography>
+                    <Typography color="text.secondary" fontSize={13}>
+                      {repo.plan_active ? 'Pause reviews without changing plan selection.' : 'Select this repository for reviews before enabling the bot.'}
+                    </Typography>
+                  </Box>
+                  <Switch
+                    checked={repo.settings.enabled}
+                    disabled={!repo.plan_active}
+                    onChange={(event) => props.onSaveSettings(repo.id, { ...repo.settings, enabled: event.target.checked })}
+                  />
+                </Stack>
                 <RepositorySettingsEditor repo={repo} onSaveSettings={props.onSaveSettings} />
                 <Alert severity={repo.failed_count > 0 ? 'warning' : 'success'} sx={{ mt: 2 }}>
-                  {repo.failed_count > 0 ? 'Some review jobs failed for this repository.' : 'Repository review flow looks healthy.'}
+                  {!repo.plan_active
+                    ? 'This repository is installed but outside the active plan selection, so pull requests will not be reviewed.'
+                    : repo.failed_count > 0
+                    ? 'Some review jobs failed for this repository.'
+                    : 'Repository review flow looks healthy.'}
                 </Alert>
               </CardContent>
             </Card>
@@ -2748,8 +3026,79 @@ function SetupPanel(props: { repos: Repository[]; setup: SetupInfo | null; stats
   );
 }
 
-function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[]; onOpenSetup: () => void }) {
+function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[]; onOpenSetup: () => void; onRefresh: () => Promise<void> }) {
   const providerReady = props.billing?.status === 'ready';
+  const checkoutReady = Boolean(props.billing?.checkout_ready && props.billing.key_id);
+  const currentPlanId = props.billing?.current_plan_id ?? 'free';
+  const availablePlans = props.billing?.plans ?? [];
+  const [selectedPlanId, setSelectedPlanId] = useState<BillingPlan['id']>('basic');
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
+  const selectedPlan = availablePlans.find((plan) => plan.id === selectedPlanId) ?? availablePlans[0] ?? null;
+  const selectedIsCurrent = selectedPlan?.id === currentPlanId;
+  const selectedIsUpgrade = selectedPlan ? planRank(selectedPlan.id) > planRank(currentPlanId) : false;
+  const canCheckout = Boolean(checkoutReady && selectedPlan && selectedPlan.id !== 'free' && (currentPlanId === 'free' || selectedIsUpgrade));
+
+  useEffect(() => {
+    if (!props.billing) return;
+    setSelectedPlanId((current) => {
+      if (availablePlans.some((plan) => plan.id === current)) return current;
+      const nextUpgrade = availablePlans.find((plan) => plan.id !== 'free' && planRank(plan.id) > planRank(props.billing!.current_plan_id));
+      return nextUpgrade?.id ?? props.billing.current_plan_id;
+    });
+  }, [availablePlans, props.billing]);
+
+  async function startRazorpayCheckout() {
+    if (!props.billing?.key_id || !selectedPlan || selectedPlan.id === 'free') return;
+    setPaymentBusy(true);
+    setPaymentMessage(null);
+
+    try {
+      await loadRazorpayCheckoutScript();
+      const orderResult = await fetchJson<{ order: { id: string; amount: number; currency: string } }>('/api/billing/razorpay/order', {
+        method: 'POST',
+        body: {
+          planId: selectedPlan.id
+        }
+      });
+
+      const checkout = new window.Razorpay!({
+        key: props.billing.key_id,
+        amount: orderResult.order.amount,
+        currency: orderResult.order.currency,
+        name: siteConfig.productName,
+        description: `${selectedPlan.name} plan`,
+        order_id: orderResult.order.id,
+        handler: async (response: RazorpayCheckoutResponse) => {
+          await fetchJson('/api/billing/razorpay/verify', {
+            method: 'POST',
+            body: {
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+              planId: selectedPlan.id
+            }
+          });
+          setPaymentMessage(`Payment verified. Your ${selectedPlan.name} plan is active.`);
+          await props.onRefresh();
+          setPaymentBusy(false);
+        },
+        modal: {
+          ondismiss: () => {
+            setPaymentBusy(false);
+          }
+        },
+        theme: {
+          color: '#2563eb'
+        }
+      });
+
+      checkout.open();
+    } catch (err) {
+      setPaymentMessage(err instanceof Error ? err.message : 'Could not start Razorpay checkout.');
+      setPaymentBusy(false);
+    }
+  }
 
   return (
     <Grid container spacing={2} sx={{ mt: 3 }}>
@@ -2767,24 +3116,104 @@ function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[];
             </Stack>
             <Grid container spacing={1.5} sx={{ mt: 2 }}>
               <MiniMetric label="Plan" value={props.billing?.plan_name ?? 'Free'} />
-              <MiniMetric label="Repos" value={props.repos.length} />
-              <MiniMetric label="Payment" value={providerReady ? 'Hosted' : 'Not connected'} />
+              <MiniMetric label="Repo limit" value={formatRepoLimit(props.billing?.repo_limit)} />
+              <MiniMetric label="Payment" value={currentPlanId === 'free' ? 'Free' : 'Active'} />
             </Grid>
+            <Card variant="outlined" sx={{ mt: 2, bgcolor: 'action.hover' }}>
+              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                  <Box>
+                    <Typography variant="overline" color="text.secondary" fontWeight={900}>
+                      Current subscription
+                    </Typography>
+                    <Typography variant="h6" fontWeight={900} color="text.primary">
+                      {props.billing?.plan_name ?? 'Free'} plan
+                    </Typography>
+                    <Typography color="text.secondary" fontSize={14}>
+                      {currentPlanId === 'free'
+                        ? 'No paid transaction yet.'
+                        : `Payment made${props.billing?.paid_at ? ` on ${formatDate(props.billing.paid_at)}` : ''}.`}
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip color={currentPlanId === 'free' ? 'default' : 'success'} label={currentPlanId === 'free' ? 'Free access' : 'Payment made'} />
+                    <Chip variant="outlined" label={`${formatRepoLimit(props.billing?.repo_limit)} repo limit`} />
+                    {props.billing?.latest_payment_id ? <Chip variant="outlined" label={`Payment ${shortPaymentId(props.billing.latest_payment_id)}`} /> : null}
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
             <Alert severity={providerReady ? 'success' : 'warning'} sx={{ mt: 2 }}>
               {providerReady
-                ? 'Payment methods are handled by the configured billing provider, so card data never touches this app.'
-                : 'Add RAZORPAY_PAYMENT_LINK_URL or RAZORPAY_CUSTOMER_PORTAL_URL to enable payment-method management.'}
+                ? 'Razorpay Checkout is ready.'
+                : 'Add Razorpay API keys to enable Checkout.'}
             </Alert>
+            <Alert severity="success" sx={{ mt: 2 }}>
+              Your {props.billing?.plan_name ?? 'Free'} plan is active with {formatRepoLimit(props.billing?.repo_limit)} repository access.
+            </Alert>
+            {paymentMessage ? (
+              <Alert severity={paymentMessage.includes('verified') ? 'success' : 'error'} sx={{ mt: 2 }}>
+                {paymentMessage}
+              </Alert>
+            ) : null}
+            <Grid container spacing={1.5} sx={{ mt: 2 }}>
+              {availablePlans.map((plan) => {
+                const selected = selectedPlan?.id === plan.id;
+                const isCurrent = currentPlanId === plan.id;
+                const isLowerPlan = planRank(plan.id) < planRank(currentPlanId);
+                return (
+                  <Grid item xs={12} sm={4} key={plan.id}>
+                    <Card
+                      onClick={() => setSelectedPlanId(plan.id)}
+                      role="button"
+                      tabIndex={0}
+                      variant="outlined"
+                      sx={{
+                        cursor: 'pointer',
+                        borderColor: selected ? 'primary.main' : 'divider',
+                        bgcolor: selected ? 'action.selected' : 'background.paper'
+                      }}
+                    >
+                      <CardContent sx={{ p: 2 }}>
+                        <Stack spacing={0.75}>
+                          <Typography color="text.primary" fontWeight={900}>{plan.name}</Typography>
+                          <Typography color="text.primary" variant="h5" fontWeight={900}>{plan.amount === 0 ? 'Free' : formatMoney(plan.amount, props.billing?.currency)}</Typography>
+                          <Stack spacing={0.5}>
+                            {plan.benefits.map((benefit) => (
+                              <Stack key={benefit} direction="row" spacing={0.75} alignItems="center">
+                                <CheckCircleIcon color="success" sx={{ fontSize: 16 }} />
+                                <Typography color="text.secondary" fontSize={13}>{benefit}</Typography>
+                              </Stack>
+                            ))}
+                          </Stack>
+                          <Chip
+                            size="small"
+                            label={isCurrent ? 'Current plan' : selected ? isLowerPlan ? 'Included' : 'Selected' : 'Choose'}
+                            color={isCurrent ? 'success' : selected ? 'primary' : 'default'}
+                          />
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                );
+              })}
+            </Grid>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 2 }}>
               <Button
-                disabled={!props.billing?.payment_link_url}
-                href={props.billing?.payment_link_url ?? undefined}
-                rel="noreferrer"
+                disabled={!canCheckout || paymentBusy}
+                onClick={startRazorpayCheckout}
                 startIcon={<CreditCardIcon />}
-                target="_blank"
                 variant="contained"
               >
-                Add payment method
+                {paymentBusy
+                  ? 'Opening checkout...'
+                  : selectedIsCurrent
+                    ? 'Current plan active'
+                    : selectedIsUpgrade
+                      ? `Upgrade to ${selectedPlan?.name}`
+                        : selectedPlan?.id === 'free'
+                        ? 'Free plan active'
+                        : `Pay ${formatMoney(selectedPlan?.amount, props.billing?.currency)}`}
               </Button>
               <Button
                 disabled={!props.billing?.customer_portal_url}
@@ -2812,8 +3241,13 @@ function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[];
             <Stack spacing={1.5}>
               <ConfigRow label="Card storage" value="Hosted provider only" />
               <ConfigRow label="PCI scope" value="No raw card handling" />
+              <ConfigRow label="Checkout" value={checkoutReady ? 'Razorpay enabled' : 'Not configured'} />
+              <ConfigRow label="Status" value={props.billing?.billing_status ?? 'free'} />
+              <ConfigRow label="Current plan" value={props.billing?.plan_name ?? 'Free'} />
+              <ConfigRow label="Repository limit" value={formatRepoLimit(props.billing?.repo_limit)} />
+              <ConfigRow label="Paid on" value={props.billing?.paid_at ? formatDate(props.billing.paid_at) : 'No paid transaction'} />
               <ConfigRow label="Invoices" value={props.billing?.customer_portal_url ? 'Portal enabled' : 'Portal not configured'} />
-              <ConfigRow label="Payment link" value={props.billing?.payment_link_url ? 'Enabled' : 'Not configured'} />
+              <ConfigRow label="Latest payment" value={props.billing?.latest_payment_id ?? 'None'} />
             </Stack>
           </CardContent>
         </Card>
@@ -3271,6 +3705,16 @@ function normalizePath(path: string) {
   return path;
 }
 
+function scrollToHashSection(hash: string) {
+  if (!hash) return;
+  const sectionId = hash.replace(/^#/, '');
+  if (!sectionId) return;
+
+  window.setTimeout(() => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 0);
+}
+
 function sectionFromPath(path: string): DashboardSection {
   const section = normalizePath(path).split('/')[2];
   if (section === 'payment' || section === 'payments' || section === 'plans') {
@@ -3315,6 +3759,61 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
+function formatMoney(amount?: number, currency?: string) {
+  if (!amount || !currency) return '';
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2
+  }).format(amount / 100);
+}
+
+function formatRepoLimit(limit?: number | null) {
+  if (limit === null) return 'Unlimited';
+  if (!limit) return '0';
+  return String(limit);
+}
+
+function planRank(planId: BillingPlan['id']) {
+  if (planId === 'free') return 0;
+  if (planId === 'basic') return 1;
+  if (planId === 'pro') return 2;
+  return 3;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(new Date(value));
+}
+
+function shortPaymentId(value: string) {
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function loadRazorpayCheckoutScript() {
+  if (window.Razorpay) return Promise.resolve();
+
+  return new Promise<void>((resolve, reject) => {
+    const existingScript = document.querySelector<HTMLScriptElement>('script[src="https://checkout.razorpay.com/v1/checkout.js"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', () => resolve(), { once: true });
+      existingScript.addEventListener('error', () => reject(new Error('Could not load Razorpay Checkout.')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Could not load Razorpay Checkout.'));
+    document.body.appendChild(script);
+  });
+}
+
 async function fetchJson<T>(path: string, options: { allowUnauthorized?: boolean; method?: string; body?: unknown } = {}) {
   const response = await fetch(path, {
     credentials: 'include',
@@ -3323,7 +3822,10 @@ async function fetchJson<T>(path: string, options: { allowUnauthorized?: boolean
     body: options.body ? JSON.stringify(options.body) : undefined
   });
   if (options.allowUnauthorized && response.status === 401) return null as T | null;
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) {
+    const errorPayload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(errorPayload?.error ?? `Request failed: ${response.status}`);
+  }
   return (await response.json()) as T;
 }
 

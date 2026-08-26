@@ -1,5 +1,8 @@
 import { prisma } from './prisma.js';
 import type { ReviewComment, StructuredReview } from '../types/index.js';
+import { getUserPlanAccess } from '../services/razorpay.service.js';
+
+type Actor = { userId: number; username: string; repoLimit?: number | null };
 
 const defaultRepositorySettings = {
   enabled: true,
@@ -158,7 +161,7 @@ export async function getRepositorySettings(repoId: number) {
 
 export async function updateRepositorySettings(
   repoId: number,
-  actor: { userId: number; username: string },
+  actor: Actor,
   input: {
     enabled: boolean;
     reviewOnOpened: boolean;
@@ -174,7 +177,7 @@ export async function updateRepositorySettings(
   const repository = await prisma.repository.findFirst({
     where: {
       id: repoId,
-      ...repositoryAccessWhere(actor)
+      ...(repositoryVisibilityWhere(actor))
     },
     select: { id: true }
   });
@@ -346,13 +349,13 @@ export async function findLatestSummaryCommentId(repoId: number, prNumber: numbe
   return pullRequest?.githubSummaryCommentId ? Number(pullRequest.githubSummaryCommentId) : null;
 }
 
-export async function listRecentReviews(actor: { userId: number; username: string }, limit = 50) {
+export async function listRecentReviews(actor: Actor, limit = 50) {
   const reviews = await prisma.review.findMany({
     take: limit,
     orderBy: { createdAt: 'desc' },
     where: {
       pullRequest: {
-        repository: repositoryAccessWhere(actor)
+        repository: await activeRepositoryWhere(actor)
       }
     },
     include: {
@@ -383,12 +386,29 @@ export async function listRecentReviews(actor: { userId: number; username: strin
   }));
 }
 
-export async function listRepositories(actor: { userId: number; username: string }) {
+export async function listRepositories(actor: Actor) {
+  const visibilityWhere = repositoryVisibilityWhere(actor);
+  const activeSelections = actor.repoLimit === null || actor.repoLimit === undefined
+    ? null
+    : await prisma.userRepositorySelection.findMany({
+        where: {
+          userId: actor.userId,
+          repository: visibilityWhere
+        },
+        orderBy: { selectedAt: 'asc' },
+        take: actor.repoLimit,
+        select: { repoId: true }
+      });
+  const activeRepoIds = activeSelections ? new Set(activeSelections.map((selection) => selection.repoId)) : null;
   const repositories = await prisma.repository.findMany({
-    where: repositoryAccessWhere(actor),
+    where: visibilityWhere,
     orderBy: { installedAt: 'desc' },
     include: {
       settings: true,
+      userSelections: {
+        where: { userId: actor.userId },
+        select: { id: true }
+      },
       pullRequests: {
         select: {
           id: true,
@@ -401,18 +421,109 @@ export async function listRepositories(actor: { userId: number; username: string
     }
   });
 
-  return repositories.map((repository: any) => ({
-    id: repository.id,
-    github_id: repository.githubId.toString(),
-    owner: repository.owner,
-    name: repository.name,
-    full_name: repository.fullName,
-    installed_at: repository.installedAt,
-    pull_request_count: repository.pullRequests.length,
-    review_count: repository.pullRequests.reduce((total: number, pr: any) => total + pr.reviews.length, 0),
-    failed_count: repository.pullRequests.filter((pr: any) => pr.status === 'failed').length,
-    settings: toRepositorySettingsDto(repository.settings)
-  }));
+  return repositories.map((repository: any) => {
+    const selected = actor.repoLimit === null || actor.repoLimit === undefined || repository.userSelections.length > 0;
+    const planActive = actor.repoLimit === null || actor.repoLimit === undefined || Boolean(activeRepoIds?.has(repository.id));
+
+    return {
+      id: repository.id,
+      github_id: repository.githubId.toString(),
+      owner: repository.owner,
+      name: repository.name,
+      full_name: repository.fullName,
+      installed_at: repository.installedAt,
+      selected,
+      plan_active: planActive,
+      selection_locked: actor.repoLimit === 1 && planActive,
+      pull_request_count: repository.pullRequests.length,
+      review_count: repository.pullRequests.reduce((total: number, pr: any) => total + pr.reviews.length, 0),
+      failed_count: repository.pullRequests.filter((pr: any) => pr.status === 'failed').length,
+      settings: toRepositorySettingsDto(repository.settings)
+    };
+  });
+}
+
+export async function updateRepositorySelection(repoId: number, actor: Actor, selected: boolean) {
+  const repository = await prisma.repository.findFirst({
+    where: {
+      id: repoId,
+      ...repositoryVisibilityWhere(actor)
+    },
+    select: {
+      id: true,
+      userSelections: {
+        where: { userId: actor.userId },
+        select: { id: true }
+      }
+    }
+  });
+
+  if (!repository) return null;
+
+  if (actor.repoLimit === null || actor.repoLimit === undefined) {
+    return repositorySelectionState(actor, true);
+  }
+
+  const alreadySelected = repository.userSelections.length > 0;
+
+  if (selected) {
+    if (!alreadySelected) {
+      const selectedCount = await prisma.userRepositorySelection.count({
+        where: {
+          userId: actor.userId,
+          repository: repositoryVisibilityWhere(actor)
+        }
+      });
+
+      if (actor.repoLimit === 1 && selectedCount >= 1) {
+        throw new Error('Free plan repository selection is locked after the first active repository. Upgrade to choose more repositories.');
+      }
+
+      if (selectedCount >= actor.repoLimit) {
+        throw new Error(`Your plan allows ${actor.repoLimit} active repositories. Deselect another repository or upgrade your plan.`);
+      }
+
+      await prisma.userRepositorySelection.create({
+        data: {
+          userId: actor.userId,
+          repoId
+        }
+      });
+    }
+  } else if (alreadySelected) {
+    if (actor.repoLimit === 1) {
+      throw new Error('Free plan repository selection cannot be changed after it is set. Upgrade to activate additional repositories.');
+    }
+
+    await prisma.userRepositorySelection.delete({
+      where: {
+        userId_repoId: {
+          userId: actor.userId,
+          repoId
+        }
+      }
+    });
+  }
+
+  return repositorySelectionState(actor, selected);
+}
+
+async function repositorySelectionState(actor: Actor, selected: boolean) {
+  const selectedCount = actor.repoLimit === null || actor.repoLimit === undefined
+    ? null
+    : await prisma.userRepositorySelection.count({
+        where: {
+          userId: actor.userId,
+          repository: repositoryVisibilityWhere(actor)
+        }
+      });
+
+  return {
+    selected,
+    plan_active: selected,
+    selected_count: selectedCount,
+    repo_limit: actor.repoLimit ?? null
+  };
 }
 
 function toRepositorySettingsDto(settings: any) {
@@ -430,31 +541,32 @@ function toRepositorySettingsDto(settings: any) {
   };
 }
 
-export async function getStats(actor: { userId: number; username: string }) {
+export async function getStats(actor: Actor) {
+  const repositoryWhere = await activeRepositoryWhere(actor);
   const [reviewCount, repositoryCount, pullRequestCount, failedCount, reviews] = await Promise.all([
     prisma.review.count({
       where: {
         pullRequest: {
-          repository: repositoryAccessWhere(actor)
+          repository: repositoryWhere
         }
       }
     }),
-    prisma.repository.count({ where: repositoryAccessWhere(actor) }),
+    prisma.repository.count({ where: repositoryWhere }),
     prisma.pullRequest.count({
       where: {
-        repository: repositoryAccessWhere(actor)
+        repository: repositoryWhere
       }
     }),
     prisma.pullRequest.count({
       where: {
         status: 'failed',
-        repository: repositoryAccessWhere(actor)
+        repository: repositoryWhere
       }
     }),
     prisma.review.findMany({
       where: {
         pullRequest: {
-          repository: repositoryAccessWhere(actor)
+          repository: repositoryWhere
         }
       },
       select: { overallScore: true, createdAt: true }
@@ -477,12 +589,12 @@ export async function getStats(actor: { userId: number; username: string }) {
   };
 }
 
-export async function getReviewDetail(actor: { userId: number; username: string }, reviewId: number) {
+export async function getReviewDetail(actor: Actor, reviewId: number) {
   const review = await prisma.review.findFirst({
     where: {
       id: reviewId,
       pullRequest: {
-        repository: repositoryAccessWhere(actor)
+        repository: await activeRepositoryWhere(actor)
       }
     },
     include: {
@@ -529,7 +641,70 @@ export async function getReviewDetail(actor: { userId: number; username: string 
   };
 }
 
-function repositoryAccessWhere(actor: { userId: number; username: string }) {
+export async function isRepositoryWithinAnyUserPlan(repoId: number) {
+  const repository = await prisma.repository.findUnique({
+    where: { id: repoId },
+    select: {
+      id: true,
+      installationId: true,
+      owner: true,
+      installation: {
+        select: {
+          suspendedAt: true,
+          users: {
+            select: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  planName: true,
+                  billingStatus: true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!repository) return false;
+
+  const users = repository.installation?.users.map((entry: any) => entry.user) ?? [];
+  for (const user of users) {
+    const access = getUserPlanAccess(user);
+    const where = await activeRepositoryWhere({
+      userId: user.id,
+      username: user.username,
+      repoLimit: access.plan.repoLimit
+    });
+    const count = await prisma.repository.count({
+      where: {
+        AND: [{ id: repoId }, where]
+      }
+    });
+    if (count > 0) return true;
+  }
+
+  if (!repository.installationId) {
+    const owner = await prisma.user.findFirst({
+      where: { username: repository.owner },
+      select: { id: true, username: true, planName: true, billingStatus: true }
+    });
+    if (!owner) return false;
+    const access = getUserPlanAccess(owner);
+    const where = await activeRepositoryWhere({
+      userId: owner.id,
+      username: owner.username,
+      repoLimit: access.plan.repoLimit
+    });
+    return prisma.repository.count({ where: { AND: [{ id: repoId }, where] } }).then((count) => count > 0);
+  }
+
+  return false;
+}
+
+function repositoryVisibilityWhere(actor: Actor) {
   return {
     OR: [
       {
@@ -550,4 +725,21 @@ function repositoryAccessWhere(actor: { userId: number; username: string }) {
       }
     ]
   } as any;
+}
+
+async function activeRepositoryWhere(actor: Actor) {
+  const baseWhere = repositoryVisibilityWhere(actor);
+  if (actor.repoLimit === null || actor.repoLimit === undefined) return baseWhere;
+
+  const selections = await prisma.userRepositorySelection.findMany({
+    where: {
+      userId: actor.userId,
+      repository: baseWhere
+    },
+    orderBy: { selectedAt: 'asc' },
+    take: actor.repoLimit,
+    select: { repoId: true }
+  });
+
+  return { id: { in: selections.map((selection) => selection.repoId) } };
 }

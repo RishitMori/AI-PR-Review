@@ -130,7 +130,7 @@ export async function completeGitHubOAuth(code: string) {
   };
 }
 
-async function syncUserInstallations(userId: number, accessToken: string) {
+export async function syncUserInstallations(userId: number, accessToken: string) {
   try {
     const installations = await listUserInstallations(accessToken);
     const activeInstallationIds: number[] = [];
@@ -210,6 +210,12 @@ export async function refreshSession(userId: number) {
   }
 
   return true;
+}
+
+export async function getSessionGitHubAccessToken(userId: number) {
+  const session = await redisConnection.get(sessionKey(userId));
+  const sessionJson = session ? safeParseSession(session) : null;
+  return sessionJson?.githubAccessToken ?? null;
 }
 
 export async function clearSession(userId: number) {

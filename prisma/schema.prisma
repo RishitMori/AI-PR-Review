@@ -18,6 +18,7 @@ model Repository {
   pullRequests PullRequest[]
   settings    RepositorySettings?
   installation GitHubInstallation? @relation(fields: [installationId], references: [id], onDelete: SetNull)
+  userSelections UserRepositorySelection[]
 
   @@index([installationId])
   @@map("repositories")
@@ -82,11 +83,32 @@ model User {
   email     String?   @db.VarChar(255)
   avatarUrl String?   @map("avatar_url") @db.VarChar(500)
   role      String    @default("viewer") @db.VarChar(50)
+  planName  String    @default("Free") @map("plan_name") @db.VarChar(100)
+  billingStatus String @default("free") @map("billing_status") @db.VarChar(50)
+  razorpayOrderId String? @map("razorpay_order_id") @db.VarChar(100)
+  razorpayPaymentId String? @map("razorpay_payment_id") @db.VarChar(100)
+  paidAt    DateTime? @map("paid_at") @db.Timestamp(6)
   createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
   lastLogin DateTime? @default(now()) @map("last_login") @db.Timestamp(6)
   installations UserInstallation[]
+  repositorySelections UserRepositorySelection[]
 
+  @@index([billingStatus])
   @@map("users")
+}
+
+model UserRepositorySelection {
+  id         Int       @id @default(autoincrement())
+  userId     Int       @map("user_id")
+  repoId     Int       @map("repo_id")
+  selectedAt DateTime? @default(now()) @map("selected_at") @db.Timestamp(6)
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repoId])
+  @@index([repoId])
+  @@map("user_repository_selections")
 }
 
 model PullRequest {

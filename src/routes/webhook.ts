@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { config } from '../config.js';
-import { getRepositorySettings, markInstallationSuspended, recordWebhookEvent, upsertGitHubInstallation, upsertPullRequest, upsertRepository } from '../db/queries.js';
+import { getRepositorySettings, isRepositoryWithinAnyUserPlan, markInstallationSuspended, recordWebhookEvent, upsertGitHubInstallation, upsertPullRequest, upsertRepository } from '../db/queries.js';
 import { reviewJobId, reviewQueue } from '../queue/review.queue.js';
 import type { ReviewJobData } from '../types/index.js';
 import { verifyWebhookSignature } from '../utils/webhook-verify.js';
@@ -55,6 +55,16 @@ webhookRouter.post('/webhook', async (req, res, next) => {
       fullName: jobData.repoFullName
     });
     const settings = await getRepositorySettings(repoId);
+    const planAllowsRepository = await isRepositoryWithinAnyUserPlan(repoId);
+    if (!planAllowsRepository) {
+      return res.status(202).json({
+        ok: true,
+        queued: false,
+        ignored: true,
+        reason: 'Repository is outside the active plan limit.'
+      });
+    }
+
     const actionEnabled =
       (payload.action === 'opened' && settings.reviewOnOpened) ||
       (payload.action === 'synchronize' && settings.reviewOnSynchronize) ||

@@ -18,6 +18,8 @@ const app = express();
 app.use('/webhook', express.raw({ type: 'application/json', limit: '5mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+app.use(applySecurityHeaders);
+app.use(requireSameOriginForCookieAuth);
 
 app.use(healthRouter);
 app.use(authRouter);
@@ -46,7 +48,7 @@ if (existsSync(dashboardDist)) {
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error(error);
   res.status(500).json({
-    error: error instanceof Error ? error.message : 'Internal server error'
+    error: config.NODE_ENV === 'production' ? 'Internal server error' : error instanceof Error ? error.message : 'Internal server error'
   });
 });
 
@@ -65,3 +67,46 @@ async function shutdown() {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+function applySecurityHeaders(_req: express.Request, res: express.Response, next: express.NextFunction) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+}
+
+function requireSameOriginForCookieAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  if (!req.path.startsWith('/api') && !req.path.startsWith('/auth')) return next();
+
+  const requestOrigin = getHeaderOrigin(req.header('origin')) ?? getHeaderOrigin(req.header('referer'));
+  if (!requestOrigin) {
+    if (config.NODE_ENV === 'production') {
+      return res.status(403).json({ error: 'Missing same-origin request header.' });
+    }
+    return next();
+  }
+
+  if (!isTrustedOrigin(requestOrigin)) {
+    return res.status(403).json({ error: 'Cross-site request rejected.' });
+  }
+
+  return next();
+}
+
+function getHeaderOrigin(value: string | undefined) {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function isTrustedOrigin(origin: string) {
+  return [config.PUBLIC_BASE_URL, config.GITHUB_CALLBACK_URL]
+    .map((value) => getHeaderOrigin(value))
+    .filter(Boolean)
+    .includes(origin);
+}
