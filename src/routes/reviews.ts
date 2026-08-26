@@ -167,7 +167,7 @@ reviewsRouter.get('/api/billing', async (req, res, next) => {
       }
     });
     const checkoutReady = isRazorpayCheckoutReady();
-    const paymentReady = Boolean(checkoutReady || config.RAZORPAY_CUSTOMER_PORTAL_URL);
+    const paymentReady = Boolean(checkoutReady || config.RAZORPAY_PAYMENT_LINK_URL || config.RAZORPAY_CUSTOMER_PORTAL_URL);
     const access = getUserPlanAccess(user);
 
     res.json({
@@ -181,6 +181,7 @@ reviewsRouter.get('/api/billing', async (req, res, next) => {
         key_id: checkoutReady ? config.RAZORPAY_KEY_ID : null,
         currency: config.RAZORPAY_CURRENCY,
         plans: [freePlan, ...razorpayPlans],
+        payment_link_url: config.RAZORPAY_PAYMENT_LINK_URL || null,
         customer_portal_url: config.RAZORPAY_CUSTOMER_PORTAL_URL || null,
         latest_payment_id: user?.razorpayPaymentId ?? null,
         paid_at: user?.paidAt?.toISOString() ?? null

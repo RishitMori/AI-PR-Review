@@ -138,6 +138,7 @@ interface BillingInfo {
   key_id: string | null;
   currency: string;
   plans: BillingPlan[];
+  payment_link_url: string | null;
   customer_portal_url: string | null;
   latest_payment_id: string | null;
   paid_at: string | null;
@@ -2945,7 +2946,7 @@ function RepositoriesPanel(props: {
                   />
                 </Stack>
                 <RepositorySettingsEditor repo={repo} onSaveSettings={props.onSaveSettings} />
-                <Alert severity={repo.failed_count > 0 ? 'warning' : 'success'} sx={{ mt: 2 }}>
+                <Alert severity={!repo.plan_active || repo.failed_count > 0 ? 'warning' : 'success'} sx={{ mt: 2 }}>
                   {!repo.plan_active
                     ? 'This repository is installed but outside the active plan selection, so pull requests will not be reviewed.'
                     : repo.failed_count > 0
@@ -3029,6 +3030,7 @@ function SetupPanel(props: { repos: Repository[]; setup: SetupInfo | null; stats
 function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[]; onOpenSetup: () => void; onRefresh: () => Promise<void> }) {
   const providerReady = props.billing?.status === 'ready';
   const checkoutReady = Boolean(props.billing?.checkout_ready && props.billing.key_id);
+  const paymentLinkReady = Boolean(props.billing?.payment_link_url);
   const currentPlanId = props.billing?.current_plan_id ?? 'free';
   const availablePlans = props.billing?.plans ?? [];
   const [selectedPlanId, setSelectedPlanId] = useState<BillingPlan['id']>('basic');
@@ -3037,7 +3039,9 @@ function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[];
   const selectedPlan = availablePlans.find((plan) => plan.id === selectedPlanId) ?? availablePlans[0] ?? null;
   const selectedIsCurrent = selectedPlan?.id === currentPlanId;
   const selectedIsUpgrade = selectedPlan ? planRank(selectedPlan.id) > planRank(currentPlanId) : false;
-  const canCheckout = Boolean(checkoutReady && selectedPlan && selectedPlan.id !== 'free' && (currentPlanId === 'free' || selectedIsUpgrade));
+  const canUsePaymentProvider = Boolean(selectedPlan && selectedPlan.id !== 'free' && (currentPlanId === 'free' || selectedIsUpgrade));
+  const canCheckout = Boolean(checkoutReady && canUsePaymentProvider);
+  const canOpenPaymentLink = Boolean(paymentLinkReady && canUsePaymentProvider);
 
   useEffect(() => {
     if (!props.billing) return;
@@ -3145,8 +3149,10 @@ function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[];
             </Card>
             <Alert severity={providerReady ? 'success' : 'warning'} sx={{ mt: 2 }}>
               {providerReady
-                ? 'Razorpay Checkout is ready.'
-                : 'Add Razorpay API keys to enable Checkout.'}
+                ? checkoutReady
+                  ? 'Razorpay Checkout is ready.'
+                  : 'Razorpay payment link is ready.'
+                : 'Add Razorpay Checkout keys or a payment link to enable upgrades.'}
             </Alert>
             <Alert severity="success" sx={{ mt: 2 }}>
               Your {props.billing?.plan_name ?? 'Free'} plan is active with {formatRepoLimit(props.billing?.repo_limit)} repository access.
@@ -3199,22 +3205,41 @@ function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[];
               })}
             </Grid>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 2 }}>
-              <Button
-                disabled={!canCheckout || paymentBusy}
-                onClick={startRazorpayCheckout}
-                startIcon={<CreditCardIcon />}
-                variant="contained"
-              >
-                {paymentBusy
-                  ? 'Opening checkout...'
-                  : selectedIsCurrent
+              {checkoutReady ? (
+                <Button
+                  disabled={!canCheckout || paymentBusy}
+                  onClick={startRazorpayCheckout}
+                  startIcon={<CreditCardIcon />}
+                  variant="contained"
+                >
+                  {paymentBusy
+                    ? 'Opening checkout...'
+                    : selectedIsCurrent
+                      ? 'Current plan active'
+                      : selectedIsUpgrade
+                        ? `Upgrade to ${selectedPlan?.name}`
+                          : selectedPlan?.id === 'free'
+                          ? 'Free plan active'
+                          : `Pay ${formatMoney(selectedPlan?.amount, props.billing?.currency)}`}
+                </Button>
+              ) : (
+                <Button
+                  disabled={!canOpenPaymentLink}
+                  href={canOpenPaymentLink ? props.billing?.payment_link_url ?? undefined : undefined}
+                  rel="noreferrer"
+                  startIcon={<CreditCardIcon />}
+                  target="_blank"
+                  variant="contained"
+                >
+                  {selectedIsCurrent
                     ? 'Current plan active'
                     : selectedIsUpgrade
                       ? `Upgrade to ${selectedPlan?.name}`
-                        : selectedPlan?.id === 'free'
+                      : selectedPlan?.id === 'free'
                         ? 'Free plan active'
-                        : `Pay ${formatMoney(selectedPlan?.amount, props.billing?.currency)}`}
-              </Button>
+                        : 'Open payment link'}
+                </Button>
+              )}
               <Button
                 disabled={!props.billing?.customer_portal_url}
                 href={props.billing?.customer_portal_url ?? undefined}
@@ -3242,6 +3267,7 @@ function BillingPanel(props: { billing: BillingInfo | null; repos: Repository[];
               <ConfigRow label="Card storage" value="Hosted provider only" />
               <ConfigRow label="PCI scope" value="No raw card handling" />
               <ConfigRow label="Checkout" value={checkoutReady ? 'Razorpay enabled' : 'Not configured'} />
+              <ConfigRow label="Payment link" value={props.billing?.payment_link_url ? 'Enabled' : 'Not configured'} />
               <ConfigRow label="Status" value={props.billing?.billing_status ?? 'free'} />
               <ConfigRow label="Current plan" value={props.billing?.plan_name ?? 'Free'} />
               <ConfigRow label="Repository limit" value={formatRepoLimit(props.billing?.repo_limit)} />
