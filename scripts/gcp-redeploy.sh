@@ -1,6 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+pause_on_error() {
+  local exit_code=$?
+  local line_number="${1:-unknown}"
+
+  if [[ "$exit_code" -eq 0 ]]; then
+    return
+  fi
+
+  echo ""
+  echo "Redeploy failed at line $line_number with exit code $exit_code."
+  echo "Check the error message above."
+
+  if [[ -t 0 && "${NO_PAUSE_ON_ERROR:-}" != "1" ]]; then
+    echo ""
+    read -r -p "Press Enter to close this terminal..." _
+  fi
+
+  exit "$exit_code"
+}
+
+trap 'pause_on_error $LINENO' ERR
+
 : "${PROJECT_ID:?Set PROJECT_ID, for example: export PROJECT_ID=ai-reviewer-505305}"
 : "${REGION:?Set REGION, for example: export REGION=asia-south1}"
 : "${INSTANCE_CONNECTION_NAME:?Set INSTANCE_CONNECTION_NAME, for example: export INSTANCE_CONNECTION_NAME=PROJECT:REGION:INSTANCE}"
