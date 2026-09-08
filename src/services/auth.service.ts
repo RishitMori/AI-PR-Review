@@ -35,6 +35,16 @@ interface GitHubOAuthState {
   returnTo: string;
 }
 
+export class OAuthLoginError extends Error {
+  constructor(
+    message: string,
+    public readonly publicMessage = 'Could not complete GitHub login. Please try again.'
+  ) {
+    super(message);
+    this.name = 'OAuthLoginError';
+  }
+}
+
 export function createGitHubOAuthState(returnTo: string) {
   return jwt.sign(
     {
@@ -84,12 +94,21 @@ export async function completeGitHubOAuth(code: string) {
   });
 
   if (!tokenResponse.ok) {
-    throw new Error(`GitHub OAuth token exchange failed (${tokenResponse.status}).`);
+    throw new OAuthLoginError(
+      `GitHub OAuth token exchange failed (${tokenResponse.status}).`,
+      'GitHub rejected the login request. Check that the GitHub App callback URL exactly matches this site.'
+    );
   }
 
   const tokenJson = (await tokenResponse.json()) as GitHubTokenResponse;
   if (!tokenJson.access_token) {
-    throw new Error(tokenJson.error_description ?? tokenJson.error ?? 'GitHub OAuth did not return an access token.');
+    const message = tokenJson.error_description ?? tokenJson.error ?? 'GitHub OAuth did not return an access token.';
+    throw new OAuthLoginError(
+      `GitHub OAuth did not return an access token: ${message}`,
+      message.includes('redirect_uri') || message.includes('verification code')
+        ? 'GitHub rejected the login code. Check that the callback URL in GitHub and production are the same.'
+        : 'GitHub did not return a login token. Please try signing in again.'
+    );
   }
 
   const githubUser = await fetchGitHubUser(tokenJson.access_token);

@@ -27,6 +27,8 @@ echo "Using project: $PROJECT_ID"
 echo "Using region: $REGION"
 echo "Using image: $IMAGE"
 echo "Using worker instances: $WORKER_INSTANCES"
+echo "Using public base URL: $PUBLIC_BASE_URL"
+echo "Using GitHub callback URL: $GITHUB_CALLBACK_URL"
 
 gcloud config set project "$PROJECT_ID" >/dev/null
 
@@ -91,6 +93,7 @@ echo ""
 echo "Redeploy complete."
 echo "API URL: $API_URL"
 echo "GitHub webhook URL: $API_URL/webhook"
+echo "GitHub OAuth callback URL: $GITHUB_CALLBACK_URL"
 echo ""
 echo "Health check:"
 echo "curl $API_URL/health"

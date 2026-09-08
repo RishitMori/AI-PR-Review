@@ -102,6 +102,15 @@ In your GitHub App OAuth settings, set callback URL to:
 https://YOUR_CLOUD_RUN_API_URL/auth/github/callback
 ```
 
+If you route the app through Firebase Hosting, use the Firebase Hosting URL everywhere instead:
+
+```text
+PUBLIC_BASE_URL=https://YOUR_PROJECT.web.app
+GITHUB_CALLBACK_URL=https://YOUR_PROJECT.web.app/auth/github/callback
+```
+
+The callback URL in GitHub, `GITHUB_CALLBACK_URL`, and the URL shown in the browser after GitHub redirects back must match exactly.
+
 ```bash
 gcloud run deploy ai-pr-review-api \
   --image $IMAGE \

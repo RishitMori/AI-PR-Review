@@ -1651,12 +1651,21 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
   const [filter, setFilter] = useState<'all' | 'done' | 'failed'>('all');
   const [repoFilter, setRepoFilter] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => readAuthErrorFromUrl());
   const [sidebarExpanded, setSidebarExpanded] = useState(() => window.localStorage.getItem('reviewpilot-sidebar-collapsed') !== 'true');
   const billingActive = Boolean(billing?.current_plan_id);
 
   useEffect(() => {
     loadSession();
+  }, []);
+
+  useEffect(() => {
+    const authError = readAuthErrorFromUrl();
+    if (!authError) return;
+
+    setError(authError);
+    const cleanPath = `${window.location.pathname}${window.location.hash}`;
+    window.history.replaceState({}, '', cleanPath);
   }, []);
 
   useEffect(() => {
@@ -1833,6 +1842,7 @@ function DashboardApp(props: { path: string; onNavigate: (path: string) => void;
               Your dashboard shows repositories, recent reviews, saved comments, and failed review runs.
             </Typography>
             <Stack spacing={1.5}>
+              {error ? <Alert severity="error">{error}</Alert> : null}
               <Button
                 href={authHref(normalizeDashboardPath(props.path))}
                 startIcon={<GitHubIcon />}
@@ -3767,6 +3777,11 @@ function pathFromSection(section: DashboardSection) {
 
 function normalizeDashboardPath(path: string) {
   return pathFromSection(sectionFromPath(path));
+}
+
+function readAuthErrorFromUrl() {
+  const message = new URLSearchParams(window.location.search).get('auth_error');
+  return message ? message.slice(0, 240) : null;
 }
 
 function readStoredColorMode(): ColorMode {

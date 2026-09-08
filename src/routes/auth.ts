@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authSessionCookieName, clearSessionAndRevokeGitHub, completeGitHubOAuth, createGitHubOAuthState, getGitHubAuthUrl, verifyAuthToken, verifyGitHubOAuthState } from '../services/auth.service.js';
+import { authSessionCookieName, clearSessionAndRevokeGitHub, completeGitHubOAuth, createGitHubOAuthState, getGitHubAuthUrl, OAuthLoginError, verifyAuthToken, verifyGitHubOAuthState } from '../services/auth.service.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { logger } from '../utils/logger.js';
 
 export const authRouter = Router();
 
@@ -11,7 +12,7 @@ authRouter.get('/auth/github', (req, res) => {
   res.redirect(getGitHubAuthUrl(state));
 });
 
-authRouter.get('/auth/github/callback', async (req, res, next) => {
+authRouter.get('/auth/github/callback', async (req, res) => {
   try {
     const code = String(req.query.code ?? '');
     const state = String(req.query.state ?? '');
@@ -35,7 +36,8 @@ authRouter.get('/auth/github/callback', async (req, res, next) => {
 
     return res.redirect(returnTo || '/dashboard');
   } catch (error) {
-    return next(error);
+    logger.error('GitHub OAuth callback failed.', error);
+    return res.redirect(authErrorRedirect(error));
   }
 });
 
@@ -68,4 +70,13 @@ function sanitizeReturnTo(value: string) {
   if (value.startsWith('//')) return '';
   if (value.startsWith('/auth') || value.startsWith('/api') || value.startsWith('/webhook')) return '';
   return value.slice(0, 200);
+}
+
+function authErrorRedirect(error: unknown) {
+  const message = error instanceof OAuthLoginError
+    ? error.publicMessage
+    : 'Could not complete GitHub login. Please try again.';
+  const url = new URL('/dashboard', config.PUBLIC_BASE_URL);
+  url.searchParams.set('auth_error', message);
+  return `${url.pathname}${url.search}`;
 }
