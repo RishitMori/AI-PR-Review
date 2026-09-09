@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { config } from '../config.js';
-import { getRepositorySettings, isRepositoryWithinAnyUserPlan, markInstallationSuspended, recordWebhookEvent, upsertGitHubInstallation, upsertPullRequest, upsertRepository } from '../db/queries.js';
-import { reviewJobId, reviewQueue } from '../queue/review.queue.js';
+import { claimNextReviewJob, completeReviewJob, enqueueReviewJob, failReviewJob, getRepositorySettings, isRepositoryWithinAnyUserPlan, markInstallationSuspended, recordWebhookEvent, upsertGitHubInstallation, upsertPullRequest, upsertRepository } from '../db/queries.js';
+import { reviewJobId } from '../queue/review.queue.js';
+import { processReviewJob } from '../services/review.service.js';
 import type { ReviewJobData } from '../types/index.js';
 import { verifyWebhookSignature } from '../utils/webhook-verify.js';
+import { logger } from '../utils/logger.js';
 
 export const webhookRouter = Router();
 
@@ -97,17 +99,47 @@ webhookRouter.post('/webhook', async (req, res, next) => {
       .map((pattern) => pattern.trim())
       .filter(Boolean);
 
-    const job = await reviewQueue.add('review-pr', jobData, {
-      jobId: reviewJobId(jobData)
-    });
+    const jobId = reviewJobId(jobData);
+    await enqueueReviewJob({ jobId, payload: jobData });
 
     return res.status(202).json({
       ok: true,
       queued: true,
-      jobId: job.id
+      jobId
     });
   } catch (error) {
     next(error);
+  }
+});
+
+webhookRouter.post('/internal/process-reviews', async (req, res, next) => {
+  try {
+    if (!isInternalProcessorAuthorized(req.header('x-internal-secret'))) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 1), 1), 5);
+    const lockId = crypto.randomUUID();
+    const results = [];
+
+    for (let index = 0; index < limit; index += 1) {
+      const job = await claimNextReviewJob(lockId);
+      if (!job) break;
+
+      try {
+        const result = await processReviewJob(job.payload);
+        await completeReviewJob(job.id);
+        results.push({ id: job.id, ok: true, result });
+      } catch (error) {
+        await failReviewJob(job.id, error);
+        logger.error(`Review DB job ${job.id} failed.`, error);
+        results.push({ id: job.id, ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return res.json({ ok: true, processed: results.length, results });
+  } catch (error) {
+    return next(error);
   }
 });
 
@@ -157,4 +189,12 @@ async function handleInstallationEvent(payload: any) {
       fullName
     });
   }
+}
+
+function isInternalProcessorAuthorized(secret: string | undefined) {
+  if (!config.PROCESS_REVIEWS_SECRET) {
+    return config.NODE_ENV !== 'production';
+  }
+
+  return secret === config.PROCESS_REVIEWS_SECRET;
 }

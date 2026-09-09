@@ -3,7 +3,7 @@
 This app needs three runtime pieces:
 
 - Cloud Run service: public webhook API
-- Cloud Run worker pool: always-on BullMQ worker
+- Cloud Run worker pool: BullMQ worker for background PR reviews
 - PostgreSQL and Redis
 
 Recommended GCP setup:
@@ -141,9 +141,11 @@ gcloud run jobs execute ai-pr-review-migrate --region $REGION --wait
 
 ## 9. Deploy Worker
 
-Cloud Run worker pools are designed for continuous background work.
+Cloud Run worker pools are designed for continuous background work, but a running BullMQ worker uses Redis commands even when traffic is low. The redeploy script defaults `WORKER_INSTANCES` to `0` to protect small free Redis plans. Set it to `1` when you want PR reviews processed continuously.
 
 ```bash
+export WORKER_INSTANCES="1"
+
 gcloud run worker-pools deploy ai-pr-review-worker \
   --image $IMAGE \
   --region $REGION \
@@ -200,7 +202,7 @@ export MIGRATE_JOB="ai-pr-review-migrate"
 export IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/app:latest"
 export GITHUB_APP_SLUG="your-github-app-slug"
 export SESSION_REFRESH_INTERVAL_SECONDS="3600"
-export WORKER_INSTANCES="1"
+export WORKER_INSTANCES="0"
 ```
 
 To pause background review processing and reduce Redis worker activity, deploy with:

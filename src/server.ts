@@ -8,7 +8,7 @@ import { healthRouter } from './routes/health.js';
 import { reviewsRouter } from './routes/reviews.js';
 import { webhookRouter } from './routes/webhook.js';
 import { disconnectPrisma } from './db/prisma.js';
-import { redisConnection } from './queue/redis.js';
+import { quitRedisConnection } from './queue/redis.js';
 import { logger } from './utils/logger.js';
 
 assertRuntimeConfig();
@@ -59,7 +59,7 @@ const server = app.listen(config.PORT, () => {
 async function shutdown() {
   logger.info('Shutting down server...');
   server.close(async () => {
-    await redisConnection.quit();
+    await quitRedisConnection();
     await disconnectPrisma();
     process.exit(0);
   });

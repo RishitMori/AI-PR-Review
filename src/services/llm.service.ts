@@ -1,5 +1,5 @@
 import { config, fallbackModels } from '../config.js';
-import { redisConnection } from '../queue/redis.js';
+import { getRedisConnection } from '../queue/redis.js';
 import type { ReviewSeverity, StructuredReview } from '../types/index.js';
 
 interface OpenRouterResponse {
@@ -142,12 +142,40 @@ async function enforceFreeTierLimits() {
 }
 
 async function incrementWithExpiry(key: string, ttlSeconds: number) {
+  const redisConnection = getRedisConnection();
+  if (!redisConnection) {
+    return incrementInMemory(key, ttlSeconds);
+  }
+
   const count = await redisConnection.incr(key);
   if (count === 1) {
     await redisConnection.expire(key, ttlSeconds);
   }
 
   return count;
+}
+
+const inMemoryCounters = new Map<string, { count: number; expiresAt: number }>();
+
+function incrementInMemory(key: string, ttlSeconds: number) {
+  const now = Date.now();
+  const current = inMemoryCounters.get(key);
+  if (!current || current.expiresAt <= now) {
+    inMemoryCounters.set(key, { count: 1, expiresAt: now + ttlSeconds * 1000 });
+    cleanupExpiredInMemoryCounters(now);
+    return 1;
+  }
+
+  current.count += 1;
+  return current.count;
+}
+
+function cleanupExpiredInMemoryCounters(now: number) {
+  for (const [key, value] of inMemoryCounters.entries()) {
+    if (value.expiresAt <= now) {
+      inMemoryCounters.delete(key);
+    }
+  }
 }
 
 function buildSystemPrompt(input: { maxComments?: number; reviewTone?: 'light' | 'balanced' | 'strict' }) {

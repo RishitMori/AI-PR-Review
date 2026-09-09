@@ -1,6 +1,7 @@
 import { prisma } from './prisma.js';
 import type { ReviewComment, StructuredReview } from '../types/index.js';
 import { getUserPlanAccess } from '../services/razorpay.service.js';
+import type { ReviewJobData } from '../types/index.js';
 
 type Actor = { userId: number; username: string; repoLimit?: number | null };
 
@@ -34,6 +35,70 @@ export async function recordWebhookEvent(input: {
     },
     update: {}
   });
+}
+
+export async function enqueueReviewJob(input: { jobId: string; payload: ReviewJobData }) {
+  await prisma.$executeRaw`
+    INSERT INTO review_jobs (job_id, payload, status, available_at, updated_at)
+    VALUES (${input.jobId}, ${JSON.stringify(input.payload)}::jsonb, 'pending', NOW(), NOW())
+    ON CONFLICT (job_id) DO UPDATE
+    SET
+      payload = EXCLUDED.payload,
+      status = CASE
+        WHEN review_jobs.status = 'done' THEN review_jobs.status
+        ELSE 'pending'
+      END,
+      available_at = NOW(),
+      updated_at = NOW()
+  `;
+}
+
+export async function claimNextReviewJob(lockId: string) {
+  const jobs = await prisma.$queryRaw<Array<{ id: number; payload: ReviewJobData; attempts: number; max_attempts: number }>>`
+    UPDATE review_jobs
+    SET
+      status = 'processing',
+      attempts = attempts + 1,
+      locked_at = NOW(),
+      locked_by = ${lockId},
+      updated_at = NOW()
+    WHERE id = (
+      SELECT id
+      FROM review_jobs
+      WHERE status IN ('pending', 'failed')
+        AND attempts < max_attempts
+        AND (available_at IS NULL OR available_at <= NOW())
+      ORDER BY created_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, payload, attempts, max_attempts
+  `;
+
+  return jobs[0] ?? null;
+}
+
+export async function completeReviewJob(jobId: number) {
+  await prisma.$executeRaw`
+    UPDATE review_jobs
+    SET status = 'done', locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = NOW()
+    WHERE id = ${jobId}
+  `;
+}
+
+export async function failReviewJob(jobId: number, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  await prisma.$executeRaw`
+    UPDATE review_jobs
+    SET
+      status = CASE WHEN attempts >= max_attempts THEN 'dead' ELSE 'failed' END,
+      locked_at = NULL,
+      locked_by = NULL,
+      last_error = ${message.slice(0, 4000)},
+      available_at = NOW() + INTERVAL '5 minutes',
+      updated_at = NOW()
+    WHERE id = ${jobId}
+  `;
 }
 
 export async function upsertGitHubInstallation(input: {

@@ -1,12 +1,17 @@
 import { Worker } from 'bullmq';
-import { assertRuntimeConfig } from '../config.js';
-import { redisConnection } from '../queue/redis.js';
+import { assertRuntimeConfig, config } from '../config.js';
+import { getRedisConnection, quitRedisConnection } from '../queue/redis.js';
 import type { ReviewJobData } from '../types/index.js';
 import { processReviewJob } from '../services/review.service.js';
 import { disconnectPrisma } from '../db/prisma.js';
 import { logger } from '../utils/logger.js';
 
 assertRuntimeConfig();
+
+const redisConnection = getRedisConnection();
+if (!config.USE_REDIS || !redisConnection) {
+  throw new Error('Redis worker requires USE_REDIS=true. Use /internal/process-reviews for the Postgres-backed queue.');
+}
 
 const worker = new Worker<ReviewJobData>(
   'review-pr',
@@ -34,7 +39,7 @@ worker.on('error', (error) => {
 async function shutdown() {
   logger.info('Shutting down review worker...');
   await worker.close();
-  await redisConnection.quit();
+  await quitRedisConnection();
   await disconnectPrisma();
   process.exit(0);
 }

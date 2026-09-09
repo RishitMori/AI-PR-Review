@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { linkUserInstallation, replaceUserInstallations, upsertGitHubInstallation, upsertRepository } from '../db/queries.js';
 import { prisma } from '../db/prisma.js';
-import { redisConnection } from '../queue/redis.js';
+import { getRedisConnection } from '../queue/redis.js';
 import { listUserInstallationRepositories, listUserInstallations } from './github.service.js';
 import type { AuthUser } from '../types/index.js';
 import { logger } from '../utils/logger.js';
@@ -111,26 +111,9 @@ export async function completeGitHubOAuth(code: string) {
     );
   }
 
-  const githubUser = await fetchGitHubUser(tokenJson.access_token);
+  const githubUser = await loadOAuthGitHubUser(tokenJson.access_token);
   const email = githubUser.email ?? (await fetchPrimaryEmail(tokenJson.access_token));
-  const existingUserCount = await prisma.user.count();
-
-  const user = await prisma.user.upsert({
-    where: { githubId: BigInt(githubUser.id) },
-    create: {
-      githubId: BigInt(githubUser.id),
-      username: githubUser.login,
-      email,
-      avatarUrl: githubUser.avatar_url ?? null,
-      role: existingUserCount === 0 ? 'owner' : 'viewer'
-    },
-    update: {
-      username: githubUser.login,
-      email,
-      avatarUrl: githubUser.avatar_url ?? null,
-      lastLogin: new Date()
-    }
-  });
+  const user = await upsertOAuthUser(githubUser, email);
 
   const authUser: AuthUser = {
     userId: user.id,
@@ -140,13 +123,60 @@ export async function completeGitHubOAuth(code: string) {
     role: user.role === 'owner' ? 'owner' : 'viewer'
   };
 
-  await storeSession(authUser.userId, tokenJson.access_token);
+  await storeOAuthSession(authUser.userId, tokenJson.access_token);
   await syncUserInstallations(authUser.userId, tokenJson.access_token);
 
   return {
     user: authUser,
     token: signAuthToken(authUser)
   };
+}
+
+async function loadOAuthGitHubUser(accessToken: string) {
+  try {
+    return await fetchGitHubUser(accessToken);
+  } catch (error) {
+    throw new OAuthLoginError(
+      error instanceof Error ? error.message : 'Could not fetch GitHub user for OAuth login.',
+      'GitHub login worked, but the app could not read your GitHub profile. Check the OAuth app scopes and try again.'
+    );
+  }
+}
+
+async function upsertOAuthUser(githubUser: GitHubUserResponse, email: string | null) {
+  try {
+    const existingUserCount = await prisma.user.count();
+
+    return await prisma.user.upsert({
+      where: { githubId: BigInt(githubUser.id) },
+      create: {
+        githubId: BigInt(githubUser.id),
+        username: githubUser.login,
+        email,
+        avatarUrl: githubUser.avatar_url ?? null,
+        role: existingUserCount === 0 ? 'owner' : 'viewer'
+      },
+      update: {
+        username: githubUser.login,
+        email,
+        avatarUrl: githubUser.avatar_url ?? null,
+        lastLogin: new Date()
+      }
+    });
+  } catch (error) {
+    throw new OAuthLoginError(
+      error instanceof Error ? error.message : 'Could not save OAuth user.',
+      'GitHub login worked, but the app could not save your user. Check database connection and migrations.'
+    );
+  }
+}
+
+async function storeOAuthSession(userId: number, accessToken: string) {
+  try {
+    await storeSession(userId, accessToken);
+  } catch (error) {
+    logger.warn('Could not store GitHub OAuth token in Redis. Login will continue without repository sync token persistence.', error);
+  }
 }
 
 export async function syncUserInstallations(userId: number, accessToken: string) {
@@ -195,6 +225,9 @@ export function verifyAuthToken(token: string) {
 }
 
 export async function storeSession(userId: number, githubAccessToken: string) {
+  const redisConnection = getRedisConnection();
+  if (!redisConnection) return;
+
   await redisConnection.set(
     sessionKey(userId),
     JSON.stringify({
@@ -208,6 +241,9 @@ export async function storeSession(userId: number, githubAccessToken: string) {
 }
 
 export async function refreshSession(userId: number) {
+  const redisConnection = getRedisConnection();
+  if (!redisConnection) return true;
+
   const session = await redisConnection.get(sessionKey(userId));
   if (!session) return false;
 
@@ -232,16 +268,30 @@ export async function refreshSession(userId: number) {
 }
 
 export async function getSessionGitHubAccessToken(userId: number) {
-  const session = await redisConnection.get(sessionKey(userId));
-  const sessionJson = session ? safeParseSession(session) : null;
-  return sessionJson?.githubAccessToken ?? null;
+  try {
+    const redisConnection = getRedisConnection();
+    if (!redisConnection) return null;
+
+    const session = await redisConnection.get(sessionKey(userId));
+    const sessionJson = session ? safeParseSession(session) : null;
+    return sessionJson?.githubAccessToken ?? null;
+  } catch (error) {
+    logger.warn('Could not read GitHub OAuth token from Redis.', error);
+    return null;
+  }
 }
 
 export async function clearSession(userId: number) {
+  const redisConnection = getRedisConnection();
+  if (!redisConnection) return;
+
   await redisConnection.del(sessionKey(userId));
 }
 
 export async function clearSessionAndRevokeGitHub(userId: number) {
+  const redisConnection = getRedisConnection();
+  if (!redisConnection) return;
+
   const session = await redisConnection.get(sessionKey(userId));
   const sessionJson = session ? safeParseSession(session) : null;
   await redisConnection.del(sessionKey(userId));

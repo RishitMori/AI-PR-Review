@@ -52,7 +52,7 @@ React Dashboard /dashboard
 Authentication flow:
 
 ```text
-User -> GitHub OAuth -> ReviewPilot session cookie -> Redis session -> Protected dashboard APIs
+User -> GitHub OAuth -> ReviewPilot session cookie -> Protected dashboard APIs
 ```
 
 ## What Is Included
@@ -61,7 +61,7 @@ User -> GitHub OAuth -> ReviewPilot session cookie -> Redis session -> Protected
 - GitHub App webhook signature verification
 - GitHub App installation token flow
 - GitHub OAuth dashboard login with HTTP-only JWT cookies
-- Redis-backed sessions with logout support
+- HTTP-only dashboard session cookies with optional Redis token storage for GitHub access sync
 - GitHub OAuth grant revocation on logout
 - PostgreSQL storage through Prisma
 - Redis + BullMQ async review worker
@@ -81,7 +81,7 @@ ReviewPilot demonstrates production-style backend engineering in one focused pro
 
 - Secure webhook handling with GitHub HMAC verification
 - Async job processing with Redis and BullMQ
-- OAuth login with HTTP-only cookies and Redis-backed sessions
+- OAuth login with HTTP-only cookies and optional Redis-backed GitHub token storage
 - GitHub App installation-token flow for repository access
 - LLM integration with structured JSON parsing and local rate limits
 - PostgreSQL-backed review history and operational failure tracking
@@ -400,12 +400,12 @@ Restart the server after changing `.env`. The Billing page enables payment butto
 
 ## GitHub Login And Logout
 
-Dashboard login uses GitHub OAuth, an HTTP-only JWT cookie, and a Redis session.
+Dashboard login uses GitHub OAuth and an HTTP-only JWT cookie. Redis stores the GitHub OAuth access token when available so the dashboard can sync repository access and revoke the GitHub grant on logout.
 
 On logout, the app:
 
 - Revokes the ReviewPilot GitHub OAuth authorization when a valid GitHub token is available
-- Deletes the Redis session
+- Deletes the optional Redis token session
 - Clears local auth cookies
 - Clears pending OAuth state cookies
 
