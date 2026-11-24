@@ -41,19 +41,11 @@ export async function enqueueReviewJob(input: { jobId: string; payload: ReviewJo
   await prisma.$executeRaw`
     INSERT INTO review_jobs (job_id, payload, status, available_at, updated_at)
     VALUES (${input.jobId}, ${JSON.stringify(input.payload)}::jsonb, 'pending', NOW(), NOW())
-    ON CONFLICT (job_id) DO UPDATE
-    SET
-      payload = EXCLUDED.payload,
-      status = CASE
-        WHEN review_jobs.status = 'done' THEN review_jobs.status
-        ELSE 'pending'
-      END,
-      available_at = NOW(),
-      updated_at = NOW()
+    ON CONFLICT (job_id) DO NOTHING
   `;
 }
 
-export async function claimNextReviewJob(lockId: string) {
+export async function claimNextReviewJob(lockId: string, jobId: string | null = null) {
   const jobs = await prisma.$queryRaw<Array<{ id: number; payload: ReviewJobData; attempts: number; max_attempts: number }>>`
     UPDATE review_jobs
     SET
@@ -65,7 +57,8 @@ export async function claimNextReviewJob(lockId: string) {
     WHERE id = (
       SELECT id
       FROM review_jobs
-      WHERE status IN ('pending', 'failed')
+      WHERE (status IN ('pending', 'failed') OR (status = 'processing' AND locked_at < NOW() - INTERVAL '15 minutes'))
+        AND (${jobId}::text IS NULL OR job_id = ${jobId})
         AND attempts < max_attempts
         AND (available_at IS NULL OR available_at <= NOW())
       ORDER BY created_at ASC
@@ -76,6 +69,18 @@ export async function claimNextReviewJob(lockId: string) {
   `;
 
   return jobs[0] ?? null;
+}
+
+export async function getReviewJobStatus(jobId: string) {
+  await prisma.$executeRaw`
+    UPDATE review_jobs SET status = 'dead', locked_at = NULL, locked_by = NULL, updated_at = NOW()
+    WHERE job_id = ${jobId} AND status = 'processing' AND attempts >= max_attempts
+      AND locked_at < NOW() - INTERVAL '15 minutes'
+  `;
+  const rows = await prisma.$queryRaw<Array<{ status: string }>>`
+    SELECT status FROM review_jobs WHERE job_id = ${jobId}
+  `;
+  return rows[0]?.status ?? null;
 }
 
 export async function completeReviewJob(jobId: number) {

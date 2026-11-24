@@ -7,6 +7,8 @@ import { processReviewJob } from '../services/review.service.js';
 import type { ReviewJobData } from '../types/index.js';
 import { verifyWebhookSignature } from '../utils/webhook-verify.js';
 import { logger } from '../utils/logger.js';
+import { dispatchReviewTask } from '../services/tasks.service.js';
+import { getReviewJobStatus } from '../db/queries.js';
 
 export const webhookRouter = Router();
 
@@ -101,6 +103,7 @@ webhookRouter.post('/webhook', async (req, res, next) => {
 
     const jobId = reviewJobId(jobData);
     await enqueueReviewJob({ jobId, payload: jobData });
+    await dispatchReviewTask(jobId);
 
     return res.status(202).json({
       ok: true,
@@ -118,13 +121,22 @@ webhookRouter.post('/internal/process-reviews', async (req, res, next) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 1), 1), 5);
+    const jobId = typeof req.body?.jobId === 'string' ? req.body.jobId : null;
+    if (config.CLOUD_TASKS_PROJECT && !jobId) return res.status(400).json({ error: 'jobId is required.' });
+    const limit = jobId ? 1 : Math.min(Math.max(Number(req.query.limit ?? 1), 1), 5);
     const lockId = crypto.randomUUID();
     const results = [];
 
     for (let index = 0; index < limit; index += 1) {
-      const job = await claimNextReviewJob(lockId);
-      if (!job) break;
+      const job = await claimNextReviewJob(lockId, jobId);
+      if (!job) {
+        if (jobId) {
+          const status = await getReviewJobStatus(jobId);
+          if (!status) return res.status(404).json({ error: 'Job not found.' });
+          if (status !== 'done' && status !== 'dead') return res.status(503).json({ error: 'Job busy or waiting for retry.' });
+        }
+        break;
+      }
 
       try {
         const result = await processReviewJob(job.payload);
@@ -133,6 +145,7 @@ webhookRouter.post('/internal/process-reviews', async (req, res, next) => {
       } catch (error) {
         await failReviewJob(job.id, error);
         logger.error(`Review DB job ${job.id} failed.`, error);
+        if (jobId) return res.status(503).json({ error: 'Review failed; task will retry.' });
         results.push({ id: job.id, ok: false, error: error instanceof Error ? error.message : String(error) });
       }
     }
@@ -196,5 +209,8 @@ function isInternalProcessorAuthorized(secret: string | undefined) {
     return config.NODE_ENV !== 'production';
   }
 
-  return secret === config.PROCESS_REVIEWS_SECRET;
+  if (!secret) return false;
+  const expected = Buffer.from(config.PROCESS_REVIEWS_SECRET);
+  const supplied = Buffer.from(secret);
+  return expected.length === supplied.length && crypto.timingSafeEqual(expected, supplied);
 }

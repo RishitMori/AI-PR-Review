@@ -1,5 +1,9 @@
 # ReviewPilot - AI GitHub PR Review Bot
 
+Production now uses Cloud Tasks with request-billed Cloud Run and optional Neon
+Postgres. Follow [the serverless deployment guide](docs/serverless-deployment.md)
+instead of the legacy always-on worker instructions below.
+
 ReviewPilot is an AI pull request review bot with a GitHub App webhook, async worker, PostgreSQL review history, GitHub OAuth dashboard login, and a React dashboard.
 
 It listens to GitHub `pull_request` events, verifies the webhook signature, queues review work in Redis/BullMQ, fetches the PR diff with a GitHub App installation token, sends the diff to OpenRouter, stores the structured review in PostgreSQL, and posts a summary review comment back to the PR.

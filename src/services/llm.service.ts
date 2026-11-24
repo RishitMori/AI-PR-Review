@@ -1,5 +1,6 @@
 import { config, fallbackModels } from '../config.js';
 import { getRedisConnection } from '../queue/redis.js';
+import { prisma } from '../db/prisma.js';
 import type { ReviewSeverity, StructuredReview } from '../types/index.js';
 
 interface OpenRouterResponse {
@@ -144,7 +145,15 @@ async function enforceFreeTierLimits() {
 async function incrementWithExpiry(key: string, ttlSeconds: number) {
   const redisConnection = getRedisConnection();
   if (!redisConnection) {
-    return incrementInMemory(key, ttlSeconds);
+    const rows = await prisma.$queryRaw<Array<{ count: number }>>`
+      INSERT INTO usage_counters (key, count, expires_at)
+      VALUES (${key}, 1, NOW() + ${ttlSeconds} * INTERVAL '1 second')
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE WHEN usage_counters.expires_at <= NOW() THEN 1 ELSE usage_counters.count + 1 END,
+        expires_at = CASE WHEN usage_counters.expires_at <= NOW() THEN EXCLUDED.expires_at ELSE usage_counters.expires_at END
+      RETURNING count
+    `;
+    return rows[0].count;
   }
 
   const count = await redisConnection.incr(key);
@@ -153,29 +162,6 @@ async function incrementWithExpiry(key: string, ttlSeconds: number) {
   }
 
   return count;
-}
-
-const inMemoryCounters = new Map<string, { count: number; expiresAt: number }>();
-
-function incrementInMemory(key: string, ttlSeconds: number) {
-  const now = Date.now();
-  const current = inMemoryCounters.get(key);
-  if (!current || current.expiresAt <= now) {
-    inMemoryCounters.set(key, { count: 1, expiresAt: now + ttlSeconds * 1000 });
-    cleanupExpiredInMemoryCounters(now);
-    return 1;
-  }
-
-  current.count += 1;
-  return current.count;
-}
-
-function cleanupExpiredInMemoryCounters(now: number) {
-  for (const [key, value] of inMemoryCounters.entries()) {
-    if (value.expiresAt <= now) {
-      inMemoryCounters.delete(key);
-    }
-  }
 }
 
 function buildSystemPrompt(input: { maxComments?: number; reviewTone?: 'light' | 'balanced' | 'strict' }) {

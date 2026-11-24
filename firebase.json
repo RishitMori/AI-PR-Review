@@ -1,12 +1,15 @@
 {
   "hosting": {
+    "public": "dashboard/dist",
     "rewrites": [
+      { "source": "/auth/**", "run": { "serviceId": "ai-pr-review-api", "region": "asia-south1" } },
+      { "source": "/api/**", "run": { "serviceId": "ai-pr-review-api", "region": "asia-south1" } },
+      { "source": "/health", "run": { "serviceId": "ai-pr-review-api", "region": "asia-south1" } },
+      { "source": "/webhook", "run": { "serviceId": "ai-pr-review-api", "region": "asia-south1" } },
+      { "source": "/internal/**", "run": { "serviceId": "ai-pr-review-api", "region": "asia-south1" } },
       {
         "source": "**",
-        "run": {
-          "serviceId": "ai-pr-review-api",
-          "region": "asia-south1"
-        }
+        "destination": "/index.html"
       }
     ]
   }

@@ -1,5 +1,9 @@
 # Google Cloud Deployment
 
+For the current event-driven architecture, follow
+[serverless deployment](serverless-deployment.md). The worker/Scheduler commands
+below describe the legacy setup and should not be used for a new deployment.
+
 This app needs three runtime pieces:
 
 - Cloud Run service: public webhook API
